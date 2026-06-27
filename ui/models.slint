@@ -1,0 +1,197 @@
+export struct DatasetCardData {
+    dataset-id: int,
+    name: string,
+    format: string,
+    size-label: string,
+    imported-at: string,
+    sheet-name: string,
+    overview: string,
+    key-hint: string,
+    time-hint: string,
+}
+
+export struct MetricCardData {
+    title: string,
+    value: string,
+    detail: string,
+}
+
+export struct ColumnRowData {
+    name: string,
+    dtype: string,
+    non-null: string,
+    missing-count: string,
+    missing-rate: string,
+    unique-count: string,
+    sample-value: string,
+    role-hint: string,
+}
+
+export struct PreviewHeaderData {
+    col1: string,
+    col2: string,
+    col3: string,
+    col4: string,
+    col5: string,
+    col6: string,
+    col7: string,
+    col8: string,
+}
+
+export struct PreviewRowData {
+    row-label: string,
+    col1: string,
+    col2: string,
+    col3: string,
+    col4: string,
+    col5: string,
+    col6: string,
+    col7: string,
+    col8: string,
+}
+
+export struct IssueRowData {
+    category: string,
+    severity: string,
+    field: string,
+    detail: string,
+}
+
+export struct StepRowData {
+    time: string,
+    action: string,
+    detail: string,
+    outcome: string,
+}
+
+export struct MappingRowData {
+    source-name: string,
+    target-name: string,
+    confidence: string,
+    status: string,
+}
+
+export struct JoinSuggestionData {
+    target-dataset: string,
+    left-key: string,
+    right-key: string,
+    join-type: string,
+    reason: string,
+}
+
+export global AppState {
+    in property <[DatasetCardData]> datasets;
+    in property <[MetricCardData]> metrics;
+    in property <[ColumnRowData]> columns;
+    in property <PreviewHeaderData> preview-header;
+    in property <[PreviewRowData]> preview-rows;
+    in property <[IssueRowData]> issues;
+    in property <[StepRowData]> steps;
+    in property <[MappingRowData]> mappings;
+    in property <[JoinSuggestionData]> join-suggestions;
+    in property <string> current-dataset-name;
+    in property <string> current-dataset-overview;
+    in property <string> quality-summary;
+    in property <string> quality-rule-summary;
+    in property <string> active-count-label;
+    in property <string> status-message;
+    in property <string> preview-page-label;
+    in property <string> preview-range-label;
+    in property <string> field-page-label;
+    in property <string> field-range-label;
+    in property <int> selected-dataset-id;
+    in property <bool> can-undo;
+    in property <bool> can-redo;
+    in property <bool> can-preview-prev;
+    in property <bool> can-preview-next;
+    in property <bool> can-field-prev;
+    in property <bool> can-field-next;
+}
+
+export global FormState {
+    in-out property <string> preview-mode: "分页";
+    in-out property <string> preview-row-count: "20";
+    in-out property <int> preview-page: 1;
+    in-out property <string> field-row-count: "12";
+    in-out property <int> field-page: 1;
+    in-out property <string> quality-primary-key;
+    in-out property <string> quality-time-column;
+    in-out property <string> rename-from;
+    in-out property <string> rename-to;
+    in-out property <string> column-list;
+    in-out property <string> sort-column;
+    in-out property <bool> sort-ascending: true;
+    in-out property <string> fill-column;
+    in-out property <string> fill-value;
+    in-out property <string> cast-column;
+    in-out property <string> cast-target: "text";
+    in-out property <string> join-dataset-id: "";
+    in-out property <string> join-left-key;
+    in-out property <string> join-right-key;
+    in-out property <string> join-kind: "left";
+    in-out property <string> filter-column;
+    in-out property <string> filter-keyword;
+    in-out property <string> range-start: "1";
+    in-out property <string> range-end: "100";
+    in-out property <string> top-row-count: "100";
+    in-out property <string> sample-row-count: "50";
+    in-out property <string> missing-columns;
+    in-out property <string> text-column;
+    in-out property <string> row-operation: "删除空行";
+    in-out property <string> text-case: "upper";
+    in-out property <string> text-operation: "文本去空白";
+    in-out property <string> replace-from;
+    in-out property <string> replace-to;
+    in-out property <string> round-column;
+    in-out property <string> round-digits: "2";
+    in-out property <string> value-operation: "默认值填充";
+    in-out property <string> aggregate-group-columns;
+    in-out property <string> aggregate-target-column;
+    in-out property <string> aggregate-function: "计数";
+}
+
+export global Logic {
+    callback import-files();
+    callback select-dataset(int);
+    callback delete-selected-dataset();
+    callback refresh-current();
+    callback apply-preview-settings();
+    callback preview-prev-page();
+    callback preview-next-page();
+    callback apply-field-settings();
+    callback field-prev-page();
+    callback field-next-page();
+    callback apply-quality-rules();
+    callback undo();
+    callback redo();
+    callback normalize-columns();
+    callback trim-text-values();
+    callback drop-empty-rows();
+    callback deduplicate-rows();
+    callback apply-rename();
+    callback apply-keep-columns();
+    callback apply-drop-columns();
+    callback apply-sort();
+    callback apply-fill-null();
+    callback apply-fill-forward();
+    callback apply-cast-column();
+    callback apply-row-operation();
+    callback apply-text-operation();
+    callback apply-value-operation();
+    callback apply-filter-contains();
+    callback apply-keep-range();
+    callback apply-keep-top-rows();
+    callback apply-sample-rows();
+    callback apply-drop-missing-rows();
+    callback apply-text-case();
+    callback apply-replace-text();
+    callback apply-round-numeric();
+    callback apply-group-aggregate();
+    callback apply-recommended-mapping();
+    callback apply-join();
+    callback export-csv();
+    callback export-json();
+    callback export-quality-report();
+    callback save-pipeline-template();
+    callback replay-pipeline-template();
+}

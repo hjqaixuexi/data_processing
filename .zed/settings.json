@@ -1,0 +1,13 @@
+{
+    "lsp": {
+        "slint": {
+            "binary": {
+                "arguments": [
+                    "-Lsleek-ui=ui/templates/sleek-ui-main/ui/sleek-ui/",
+                    "-Lmaterial=ui/templates/material-1.0/material.slint",
+                    "-Llucide=ui/templates/lucide.slint",
+                ],
+            },
+        },
+    },
+}

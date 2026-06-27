@@ -1,0 +1,245 @@
+import {
+    ComboBox,
+    LineEdit,
+    VerticalBox,
+    HorizontalBox,
+} from "std-widgets.slint";
+import { AppTheme } from "theme.slint";
+import { DatasetCardData, MetricCardData } from "models.slint";
+
+export component Panel inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+
+    background: AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    border-radius: AppTheme.radius;
+    clip: false;
+
+    VerticalBox {
+        padding: AppTheme.panel-padding;
+        spacing: AppTheme.spacing;
+
+        if root.title != "" : Text {
+            text: root.title;
+            color: AppTheme.text;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        if root.subtitle != "" : Text {
+            text: root.subtitle;
+            color: AppTheme.text-soft;
+            font-size: 10px;
+            wrap: word-wrap;
+        }
+
+        @children
+    }
+}
+
+export component StatusTag inherits Rectangle {
+    in property <string> label;
+    in property <brush> fill: AppTheme.panel-muted;
+    in property <color> text-color: AppTheme.text-soft;
+
+    background: root.fill;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    border-radius: 3px;
+    min-width: 42px;
+    min-height: 18px;
+
+    Text {
+        text: root.label;
+        color: root.text-color;
+        font-size: 9px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+}
+
+export component DatasetRow inherits Rectangle {
+    in property <DatasetCardData> dataset;
+    in property <bool> selected;
+    callback activated(int);
+
+    background: root.selected ? AppTheme.selected-bg : AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: root.selected ? AppTheme.selected-border : AppTheme.border;
+    border-radius: 3px;
+    min-height: 74px;
+    clip: true;
+
+    VerticalBox {
+        padding: 6px;
+        spacing: 3px;
+
+        HorizontalBox {
+            spacing: 4px;
+
+            StatusTag { label: dataset.format; }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: dataset.size-label;
+                color: AppTheme.text-muted;
+                font-size: 9px;
+            }
+        }
+
+        Text {
+            text: dataset.name;
+            color: AppTheme.text;
+            font-size: 11px;
+            font-weight: 700;
+            wrap: no-wrap;
+        }
+
+        HorizontalBox {
+            spacing: 6px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: dataset.overview;
+                color: AppTheme.text-soft;
+                font-size: 9px;
+                wrap: no-wrap;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: dataset.imported-at;
+                color: AppTheme.text-muted;
+                font-size: 9px;
+            }
+        }
+
+        Text {
+            text: "键: " + dataset.key-hint + " | 时: " + dataset.time-hint;
+            color: AppTheme.text-muted;
+            font-size: 9px;
+            wrap: no-wrap;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.activated(dataset.dataset-id); }
+    }
+}
+
+export component MetricTile inherits Rectangle {
+    in property <MetricCardData> metric;
+
+    background: AppTheme.panel-muted;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    border-radius: 3px;
+    min-width: 124px;
+    min-height: 62px;
+
+    VerticalBox {
+        padding: 7px;
+        spacing: 2px;
+
+        Text {
+            text: metric.title;
+            color: AppTheme.text-soft;
+            font-size: 9px;
+        }
+
+        Text {
+            text: metric.value;
+            color: AppTheme.text;
+            font-size: 17px;
+            font-weight: 700;
+        }
+
+        Text {
+            text: metric.detail;
+            color: AppTheme.text-muted;
+            font-size: 9px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component LabeledField inherits VerticalBox {
+    in property <string> label;
+    in property <string> placeholder;
+    in-out property <string> text <=> input.text;
+
+    spacing: 2px;
+
+    Text {
+        text: root.label;
+        color: AppTheme.text-soft;
+        font-size: 10px;
+    }
+
+    input := LineEdit {
+        placeholder-text: root.placeholder;
+        height: 28px;
+    }
+}
+
+export component LabeledChoice inherits VerticalBox {
+    in property <string> label;
+    in property <[string]> model;
+    in-out property <string> value <=> input.current-value;
+
+    spacing: 2px;
+
+    Text {
+        text: root.label;
+        color: AppTheme.text-soft;
+        font-size: 10px;
+    }
+
+    input := ComboBox {
+        model: root.model;
+        height: 28px;
+    }
+}
+
+export component TabButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback pressed();
+
+    background: root.selected ? AppTheme.accent-bg : AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: root.selected ? AppTheme.accent-bg : AppTheme.border;
+    border-radius: 3px;
+    min-width: 58px;
+    min-height: 24px;
+
+    Text {
+        text: root.label;
+        color: root.selected ? AppTheme.accent-fg : AppTheme.text-soft;
+        font-size: 10px;
+        font-weight: root.selected ? 700 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.pressed(); }
+    }
+
+    states [
+        hover when touch.has-hover && !root.selected: {
+            background: #f2f6fb;
+        }
+    ]
+}

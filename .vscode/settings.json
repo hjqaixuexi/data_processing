@@ -1,0 +1,7 @@
+{
+    "slint.libraryPaths": {
+        "sleek-ui": "ui/templates/sleek-ui-main/ui/sleek-ui/",
+        "material": "ui/templates/material-1.0/material.slint",
+        "lucide": "ui/templates/lucide.slint"
+    }
+}

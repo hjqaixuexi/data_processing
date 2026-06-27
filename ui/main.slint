@@ -1,0 +1,1683 @@
+import {
+    Button,
+    HorizontalBox,
+    ScrollView,
+    VerticalBox,
+} from "std-widgets.slint";
+import {
+    AppState,
+    ColumnRowData,
+    DatasetCardData,
+    FormState,
+    IssueRowData,
+    JoinSuggestionData,
+    Logic,
+    MappingRowData,
+    MetricCardData,
+    PreviewHeaderData,
+    PreviewRowData,
+    StepRowData,
+} from "models.slint";
+import { AppTheme } from "theme.slint";
+import {
+    DatasetRow,
+    LabeledChoice,
+    LabeledField,
+    MetricTile,
+    Panel,
+    StatusTag,
+    TabButton,
+} from "widgets.slint";
+
+export {
+    AppState,
+    ColumnRowData,
+    DatasetCardData,
+    FormState,
+    IssueRowData,
+    JoinSuggestionData,
+    Logic,
+    MappingRowData,
+    MetricCardData,
+    PreviewHeaderData,
+    PreviewRowData,
+    StepRowData,
+}from "models.slint";
+
+component SummaryLine inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    min-height: 26px;
+    background: AppTheme.panel-muted;
+    border-width: 1px;
+    border-color: AppTheme.border;
+
+    HorizontalBox {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        Text {
+            width: 78px;
+            text: root.label;
+            color: AppTheme.text-soft;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.value;
+            color: AppTheme.text;
+            font-size: 10px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component InlineActionButton inherits VerticalBox {
+    in property <string> label;
+    in property <bool> primary: false;
+    callback pressed();
+
+    spacing: 2px;
+
+    Rectangle {
+        height: 14px;
+    }
+
+    Button {
+        text: root.label;
+        primary: root.primary;
+        height: 28px;
+        clicked => { root.pressed(); }
+    }
+}
+
+component InlineToggleButton inherits VerticalBox {
+    in property <string> label;
+    in-out property <bool> checked;
+
+    spacing: 2px;
+
+    Rectangle {
+        height: 14px;
+    }
+
+    Button {
+        text: root.label;
+        checkable: true;
+        checked <=> root.checked;
+        height: 28px;
+    }
+}
+
+component PagerBadge inherits Rectangle {
+    in property <string> label;
+
+    width: 92px;
+    height: 28px;
+    background: AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    border-radius: 3px;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: AppTheme.text;
+        font-size: 10px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component LedgerHeaderCell inherits Rectangle {
+    in property <string> label;
+    in property <length> cell-width;
+    in property <bool> center: false;
+
+    width: root.cell-width;
+    height: 28px;
+    background: AppTheme.rail-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    clip: true;
+
+    Text {
+        x: 6px;
+        y: 6px;
+        width: parent.width - 12px;
+        text: root.label;
+        color: AppTheme.text-soft;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: root.center ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
+        wrap: no-wrap;
+    }
+}
+
+component LedgerCell inherits Rectangle {
+    in property <string> value;
+    in property <length> cell-width;
+    in property <bool> alternate: false;
+    in property <bool> center: false;
+
+    width: root.cell-width;
+    height: 28px;
+    background: root.alternate ? #fbfcfe : AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    clip: true;
+
+    Text {
+        x: 6px;
+        y: 6px;
+        width: parent.width - 12px;
+        text: root.value;
+        color: AppTheme.text;
+        font-size: 10px;
+        horizontal-alignment: root.center ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
+        wrap: no-wrap;
+    }
+}
+
+component IssueRow inherits Rectangle {
+    in property <string> category;
+    in property <string> severity;
+    in property <string> field;
+    in property <string> detail;
+
+    min-height: 34px;
+    background: AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+
+    HorizontalBox {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+
+        LedgerCell {
+            cell-width: 96px;
+            value: root.category;
+        }
+
+        LedgerCell {
+            cell-width: 64px;
+            value: root.severity;
+            center: true;
+        }
+
+        LedgerCell {
+            cell-width: 180px;
+            value: root.field;
+        }
+
+        LedgerCell {
+            cell-width: 620px;
+            value: root.detail;
+        }
+    }
+}
+
+component JoinRow inherits Rectangle {
+    in property <string> target-dataset;
+    in property <string> left-key;
+    in property <string> right-key;
+    in property <string> join-type;
+    in property <string> reason;
+
+    min-height: 34px;
+    background: AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+
+    HorizontalBox {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+
+        LedgerCell {
+            cell-width: 180px;
+            value: root.target-dataset;
+        }
+
+        LedgerCell {
+            cell-width: 150px;
+            value: root.left-key;
+        }
+
+        LedgerCell {
+            cell-width: 150px;
+            value: root.right-key;
+        }
+
+        LedgerCell {
+            cell-width: 88px;
+            value: root.join-type;
+            center: true;
+        }
+
+        LedgerCell {
+            cell-width: 350px;
+            value: root.reason;
+        }
+    }
+}
+
+component StepRow inherits Rectangle {
+    in property <string> time;
+    in property <string> action;
+    in property <string> detail;
+    in property <string> outcome;
+
+    min-height: 34px;
+    background: AppTheme.panel-bg;
+    border-width: 1px;
+    border-color: AppTheme.border;
+
+    HorizontalBox {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+
+        LedgerCell {
+            cell-width: 78px;
+            value: root.time;
+            center: true;
+        }
+
+        LedgerCell {
+            cell-width: 160px;
+            value: root.action;
+        }
+
+        LedgerCell {
+            cell-width: 430px;
+            value: root.detail;
+        }
+
+        LedgerCell {
+            cell-width: 280px;
+            value: root.outcome;
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    in-out property <int> active-tab: 0;
+    private property <length> page-padding: 0px;
+    private property <length> sidebar-width: 316px;
+    private property <length> preview-col-width: root.width > 1600px ? 154px : 136px;
+    private property <length> preview-table-width: 54px + 8 * root.preview-col-width;
+    private property <length> issue-table-width: 960px;
+    private property <length> field-table-width: 812px;
+
+    title: "工程数据处理台";
+    preferred-width: 1500px;
+    preferred-height: 940px;
+    min-width: 1500px;
+    min-height: 940px;
+    background: AppTheme.window-bg;
+
+    main_menu := MenuBar {
+        Menu {
+            title: "文件";
+
+            MenuItem {
+                title: "导入文件";
+                activated => { Logic.import-files(); }
+            }
+
+            MenuItem {
+                title: "删除当前数据集";
+                activated => { Logic.delete-selected-dataset(); }
+            }
+        }
+
+        Menu {
+            title: "编辑";
+
+            MenuItem {
+                title: "撤销";
+                activated => { Logic.undo(); }
+            }
+
+            MenuItem {
+                title: "重做";
+                activated => { Logic.redo(); }
+            }
+        }
+
+        Menu {
+            title: "数据";
+
+            MenuItem {
+                title: "复检当前数据集";
+                activated => { Logic.refresh-current(); }
+            }
+        }
+
+        Menu {
+            title: "导出";
+
+            MenuItem {
+                title: "导出 CSV";
+                activated => { Logic.export-csv(); }
+            }
+
+            MenuItem {
+                title: "导出 JSON";
+                activated => { Logic.export-json(); }
+            }
+
+            MenuItem {
+                title: "质量报告 PDF";
+                activated => { Logic.export-quality-report(); }
+            }
+        }
+    }
+
+    content := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        clip: true;
+
+        HorizontalBox {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            spacing: root.page-padding;
+
+            VerticalBox {
+                width: root.sidebar-width;
+                height: parent.height;
+                spacing: root.page-padding;
+                padding-bottom: 10px;
+
+                Panel {
+                    title: "已导入数据集";
+                    subtitle: "";
+                    vertical-stretch: 1;
+
+                    Rectangle {
+                        min-height: 0px;
+                        background: AppTheme.rail-bg;
+                        border-width: 1px;
+                        border-color: AppTheme.border;
+
+                        ScrollView {
+                            VerticalBox {
+                                spacing: 4px;
+                                padding: 4px;
+
+                                for dataset in AppState.datasets: DatasetRow {
+                                    dataset: dataset;
+                                    selected: AppState.selected-dataset-id == dataset.dataset-id;
+                                    activated(id) => { Logic.select-dataset(id); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Panel {
+                    title: "状态摘要";
+                    subtitle: "";
+                    min-height: 188px;
+
+                    SummaryLine {
+                        label: "当前集";
+                        value: AppState.current-dataset-name;
+                    }
+
+                    SummaryLine {
+                        label: "概况";
+                        value: AppState.current-dataset-overview;
+                    }
+
+                    SummaryLine {
+                        label: "质量";
+                        value: AppState.quality-summary;
+                    }
+
+                    SummaryLine {
+                        label: "状态";
+                        value: AppState.status-message;
+                    }
+                }
+            }
+
+            VerticalBox {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                height: parent.height;
+                spacing: root.page-padding;
+                padding-bottom: 10px;
+
+                if AppState.selected-dataset-id != 0: HorizontalBox {
+                    spacing: 6px;
+                    for metric in AppState.metrics: MetricTile {
+                        metric: metric;
+                    }
+                }
+
+                Panel {
+                    title: "工作区";
+                    subtitle: "";
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+
+                    HorizontalBox {
+                        spacing: 4px;
+
+                        TabButton {
+                            label: "预览";
+                            selected: root.active-tab == 0;
+                            pressed => { root.active-tab = 0; }
+                        }
+
+                        TabButton {
+                            label: "质量";
+                            selected: root.active-tab == 1;
+                            pressed => { root.active-tab = 1; }
+                        }
+
+                        TabButton {
+                            label: "清洗";
+                            selected: root.active-tab == 2;
+                            pressed => { root.active-tab = 2; }
+                        }
+
+                        TabButton {
+                            label: "聚合";
+                            selected: root.active-tab == 3;
+                            pressed => { root.active-tab = 3; }
+                        }
+
+                        TabButton {
+                            label: "融合";
+                            selected: root.active-tab == 4;
+                            pressed => { root.active-tab = 4; }
+                        }
+
+                        TabButton {
+                            label: "流程";
+                            selected: root.active-tab == 5;
+                            pressed => { root.active-tab = 5; }
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        background: transparent;
+                        min-width: 0px;
+                        min-height: 0px;
+                        clip: true;
+
+                        Rectangle {
+                            x: 2px;
+                            y: 2px;
+                            width: parent.width > 4px ? parent.width - 4px : 0px;
+                            height: parent.height > 4px ? parent.height - 4px : 0px;
+                            background: transparent;
+                            min-width: 0px;
+                            min-height: 0px;
+                            clip: true;
+
+                            preview-page := Rectangle {
+                                visible: root.active-tab == 0;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: transparent;
+                                clip: true;
+
+                                VerticalBox {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: 0px;
+                                    spacing: 8px;
+
+                                    Panel {
+                                        title: "样表预览";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+                                        vertical-stretch: 3;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledChoice {
+                                                    width: 140px;
+                                                    label: "模式";
+                                                    model: ["分页", "随机抽样"];
+                                                    value <=> FormState.preview-mode;
+                                                }
+
+                                                LabeledField {
+                                                    width: 96px;
+                                                    label: "每页行数";
+                                                    placeholder: "20";
+                                                    text <=> FormState.preview-row-count;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 86px;
+                                                    label: "应用";
+                                                    primary: true;
+                                                    pressed => { Logic.apply-preview-settings(); }
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+
+                                                Text {
+                                                    width: 150px;
+                                                    vertical-alignment: center;
+                                                    color: AppTheme.text-soft;
+                                                    font-size: 10px;
+                                                    text: AppState.preview-range-label;
+                                                    horizontal-alignment: right;
+                                                }
+
+                                                HorizontalBox {
+                                                    width: 286px;
+                                                    spacing: 6px;
+
+                                                    Button {
+                                                        text: "上一页";
+                                                        height: 28px;
+                                                        enabled: AppState.can-preview-prev;
+                                                        clicked => { Logic.preview-prev-page(); }
+                                                    }
+
+                                                    PagerBadge {
+                                                        label: AppState.preview-page-label;
+                                                    }
+
+                                                    Button {
+                                                        text: "下一页";
+                                                        height: 28px;
+                                                        enabled: AppState.can-preview-next;
+                                                        clicked => { Logic.preview-next-page(); }
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                min-height: 360px;
+                                                vertical-stretch: 1;
+                                                background: AppTheme.panel-bg;
+                                                border-width: 1px;
+                                                border-color: AppTheme.border;
+                                                clip: true;
+
+                                                preview-scroll := ScrollView {
+                                                    x: 0px;
+                                                    y: 0px;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    viewport-width: max(self.visible-width, preview-content.preferred-width);
+                                                    viewport-height: max(self.visible-height, preview-content.preferred-height);
+                                                    preview-table := Rectangle {
+                                                        width: preview-scroll.viewport-width;
+                                                        height: preview-scroll.viewport-height;
+                                                        background: AppTheme.panel-bg;
+
+                                                        preview-content := VerticalBox {
+                                                            width: parent.width;
+                                                            spacing: 0px;
+
+                                                            HorizontalBox {
+                                                                spacing: 0px;
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 54px;
+                                                                    label: "#";
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col1;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col2;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col3;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col4;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col5;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col6;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col7;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    label: AppState.preview-header.col8;
+                                                                }
+                                                            }
+
+                                                            for row[index] in AppState.preview-rows: HorizontalBox {
+                                                                spacing: 0px;
+                                                                LedgerCell {
+                                                                    cell-width: 54px;
+                                                                    value: row.row-label;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col1;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col2;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col3;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col4;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col5;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col6;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col7;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: root.preview-col-width;
+                                                                    value: row.col8;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "字段台账";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+                                        vertical-stretch: 2;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 96px;
+                                                    label: "每页字段";
+                                                    placeholder: "12";
+                                                    text <=> FormState.field-row-count;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 86px;
+                                                    label: "应用";
+                                                    pressed => { Logic.apply-field-settings(); }
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+
+                                                Text {
+                                                    width: 150px;
+                                                    vertical-alignment: center;
+                                                    color: AppTheme.text-soft;
+                                                    font-size: 10px;
+                                                    text: AppState.field-range-label;
+                                                    horizontal-alignment: right;
+                                                }
+
+                                                HorizontalBox {
+                                                    width: 286px;
+                                                    spacing: 6px;
+
+                                                    Button {
+                                                        text: "上一页";
+                                                        height: 28px;
+                                                        enabled: AppState.can-field-prev;
+                                                        clicked => { Logic.field-prev-page(); }
+                                                    }
+
+                                                    PagerBadge {
+                                                        label: AppState.field-page-label;
+                                                    }
+
+                                                    Button {
+                                                        text: "下一页";
+                                                        height: 28px;
+                                                        enabled: AppState.can-field-next;
+                                                        clicked => { Logic.field-next-page(); }
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                min-height: 240px;
+                                                vertical-stretch: 1;
+                                                background: AppTheme.panel-bg;
+                                                border-width: 1px;
+                                                border-color: AppTheme.border;
+                                                clip: true;
+
+                                                field-scroll := ScrollView {
+                                                    x: 0px;
+                                                    y: 0px;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    viewport-width: max(self.visible-width, root.field-table-width);
+                                                    viewport-height: max(self.visible-height, field-content.preferred-height);
+                                                    field-table := Rectangle {
+                                                        width: field-scroll.viewport-width;
+                                                        height: field-scroll.viewport-height;
+                                                        background: AppTheme.panel-bg;
+
+                                                        field-content := VerticalBox {
+                                                            width: parent.width;
+                                                            spacing: 0px;
+
+                                                            HorizontalBox {
+                                                                spacing: 0px;
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 180px;
+                                                                    label: "字段";
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 80px;
+                                                                    label: "类型";
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 80px;
+                                                                    label: "非空";
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 80px;
+                                                                    label: "缺失";
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 92px;
+                                                                    label: "缺失率";
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 80px;
+                                                                    label: "唯一值";
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerHeaderCell {
+                                                                    cell-width: 220px;
+                                                                    label: "示例";
+                                                                }
+                                                            }
+
+                                                            for column[index] in AppState.columns: HorizontalBox {
+                                                                spacing: 0px;
+                                                                LedgerCell {
+                                                                    cell-width: 180px;
+                                                                    value: column.name;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: 80px;
+                                                                    value: column.dtype;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: 80px;
+                                                                    value: column.non-null;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: 80px;
+                                                                    value: column.missing-count;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: 92px;
+                                                                    value: column.missing-rate;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: 80px;
+                                                                    value: column.unique-count;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                    center: true;
+                                                                }
+
+                                                                LedgerCell {
+                                                                    cell-width: 220px;
+                                                                    value: column.sample-value;
+                                                                    alternate: Math.mod(index, 2) == 1;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            quality-page := Rectangle {
+                                visible: root.active-tab == 1;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: transparent;
+                                clip: true;
+
+                                VerticalBox {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: 0px;
+                                    spacing: 8px;
+
+                                    Rectangle {
+                                        min-height: 44px;
+                                        max-height: 44px;
+                                        horizontal-stretch: 1;
+                                        background: AppTheme.panel-bg;
+                                        border-width: 1px;
+                                        border-color: AppTheme.border;
+
+                                        HorizontalBox {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            spacing: 6px;
+
+                                            Button {
+                                                text: "重新复检";
+                                                primary: true;
+                                                height: 28px;
+                                                clicked => { Logic.refresh-current(); }
+                                            }
+
+                                            Button {
+                                                text: "导出 PDF";
+                                                height: 28px;
+                                                clicked => { Logic.export-quality-report(); }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "问题台账";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+                                        vertical-stretch: 1;
+
+                                        Rectangle {
+                                            min-height: 320px;
+                                            vertical-stretch: 1;
+                                            background: AppTheme.panel-bg;
+                                            border-width: 1px;
+                                            border-color: AppTheme.border;
+                                            clip: true;
+
+                                            ScrollView {
+                                                issue-table := Rectangle {
+                                                    width: root.issue-table-width > parent.width ? root.issue-table-width : parent.width;
+                                                    height: issue-content.preferred-height;
+                                                    background: AppTheme.panel-bg;
+
+                                                    issue-content := VerticalBox {
+                                                        width: parent.width;
+                                                        spacing: 0px;
+
+                                                        HorizontalBox {
+                                                            spacing: 0px;
+                                                            LedgerHeaderCell {
+                                                                cell-width: 96px;
+                                                                label: "类别";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 64px;
+                                                                label: "等级";
+                                                                center: true;
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 180px;
+                                                                label: "字段";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 620px;
+                                                                label: "说明";
+                                                            }
+                                                        }
+
+                                                        for issue in AppState.issues: IssueRow {
+                                                            category: issue.category;
+                                                            severity: issue.severity;
+                                                            field: issue.field;
+                                                            detail: issue.detail;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            cleaning-page := Rectangle {
+                                visible: root.active-tab == 2;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: transparent;
+                                clip: true;
+
+                                VerticalBox {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: 0px;
+                                    spacing: 8px;
+
+                                    Panel {
+                                        title: "行处理";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledChoice {
+                                                    width: 180px;
+                                                    label: "动作";
+                                                    model: [
+                                                        "删除空行",
+                                                        "整表去重",
+                                                        "按关键词筛选",
+                                                        "保留行范围",
+                                                        "保留前N行",
+                                                        "抽样N行",
+                                                        "删除缺失记录"
+                                                    ];
+                                                    value <=> FormState.row-operation;
+                                                }
+
+                                                if FormState.row-operation == "按关键词筛选": LabeledField {
+                                                    width: 150px;
+                                                    label: "筛选列";
+                                                    placeholder: "status";
+                                                    text <=> FormState.filter-column;
+                                                }
+
+                                                if FormState.row-operation == "按关键词筛选": LabeledField {
+                                                    width: 160px;
+                                                    label: "关键词";
+                                                    placeholder: "offline";
+                                                    text <=> FormState.filter-keyword;
+                                                }
+
+                                                if FormState.row-operation == "保留行范围": LabeledField {
+                                                    width: 96px;
+                                                    label: "起始";
+                                                    placeholder: "1";
+                                                    text <=> FormState.range-start;
+                                                }
+
+                                                if FormState.row-operation == "保留行范围": LabeledField {
+                                                    width: 96px;
+                                                    label: "结束";
+                                                    placeholder: "100";
+                                                    text <=> FormState.range-end;
+                                                }
+
+                                                if FormState.row-operation == "保留前N行": LabeledField {
+                                                    width: 110px;
+                                                    label: "行数";
+                                                    placeholder: "100";
+                                                    text <=> FormState.top-row-count;
+                                                }
+
+                                                if FormState.row-operation == "抽样N行": LabeledField {
+                                                    width: 110px;
+                                                    label: "样本数";
+                                                    placeholder: "50";
+                                                    text <=> FormState.sample-row-count;
+                                                }
+
+                                                if FormState.row-operation == "删除缺失记录": LabeledField {
+                                                    width: 260px;
+                                                    label: "检查列";
+                                                    placeholder: "device_id,status";
+                                                    text <=> FormState.missing-columns;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 88px;
+                                                    label: "执行";
+                                                    primary: true;
+                                                    pressed => { Logic.apply-row-operation(); }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "列处理";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 180px;
+                                                    label: "原列名";
+                                                    placeholder: "source_col";
+                                                    text <=> FormState.rename-from;
+                                                }
+
+                                                LabeledField {
+                                                    width: 180px;
+                                                    label: "新列名";
+                                                    placeholder: "target_col";
+                                                    text <=> FormState.rename-to;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 88px;
+                                                    label: "重命名";
+                                                    pressed => { Logic.apply-rename(); }
+                                                }
+                                            }
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    horizontal-stretch: 1;
+                                                    label: "列清单";
+                                                    placeholder: "a,b,c";
+                                                    text <=> FormState.column-list;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 88px;
+                                                    label: "保留列";
+                                                    pressed => { Logic.apply-keep-columns(); }
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 88px;
+                                                    label: "删除列";
+                                                    pressed => { Logic.apply-drop-columns(); }
+                                                }
+                                            }
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 180px;
+                                                    label: "排序列";
+                                                    placeholder: "timestamp";
+                                                    text <=> FormState.sort-column;
+                                                }
+
+                                                InlineToggleButton {
+                                                    width: 88px;
+                                                    label: FormState.sort-ascending ? "升序" : "降序";
+                                                    checked <=> FormState.sort-ascending;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 88px;
+                                                    label: "执行排序";
+                                                    pressed => { Logic.apply-sort(); }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "文本处理";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        HorizontalBox {
+                                            spacing: 6px;
+
+                                            LabeledChoice {
+                                                width: 180px;
+                                                label: "动作";
+                                                model: ["文本去空白", "大小写统一", "文本替换", "列名标准化"];
+                                                value <=> FormState.text-operation;
+                                            }
+
+                                            if FormState.text-operation == "大小写统一" || FormState.text-operation == "文本替换": LabeledField {
+                                                width: 180px;
+                                                label: "目标列";
+                                                placeholder: "status";
+                                                text <=> FormState.text-column;
+                                            }
+
+                                            if FormState.text-operation == "大小写统一": LabeledChoice {
+                                                width: 140px;
+                                                label: "大小写";
+                                                model: ["upper", "lower"];
+                                                value <=> FormState.text-case;
+                                            }
+
+                                            if FormState.text-operation == "文本替换": LabeledField {
+                                                width: 140px;
+                                                label: "替换前";
+                                                placeholder: "FAIL";
+                                                text <=> FormState.replace-from;
+                                            }
+
+                                            if FormState.text-operation == "文本替换": LabeledField {
+                                                width: 140px;
+                                                label: "替换后";
+                                                placeholder: "FAILED";
+                                                text <=> FormState.replace-to;
+                                            }
+
+                                            InlineActionButton {
+                                                width: 88px;
+                                                label: "执行";
+                                                pressed => { Logic.apply-text-operation(); }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "值处理";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        HorizontalBox {
+                                            spacing: 6px;
+
+                                            LabeledChoice {
+                                                width: 180px;
+                                                label: "动作";
+                                                model: ["默认值填充", "前值填充", "类型转换", "数值保留小数位"];
+                                                value <=> FormState.value-operation;
+                                            }
+
+                                            if FormState.value-operation == "默认值填充" || FormState.value-operation == "前值填充": LabeledField {
+                                                width: 180px;
+                                                label: "目标列";
+                                                placeholder: "status";
+                                                text <=> FormState.fill-column;
+                                            }
+
+                                            if FormState.value-operation == "默认值填充": LabeledField {
+                                                width: 180px;
+                                                label: "默认值";
+                                                placeholder: "offline";
+                                                text <=> FormState.fill-value;
+                                            }
+
+                                            if FormState.value-operation == "类型转换": LabeledField {
+                                                width: 180px;
+                                                label: "转换列";
+                                                placeholder: "value";
+                                                text <=> FormState.cast-column;
+                                            }
+
+                                            if FormState.value-operation == "类型转换": LabeledChoice {
+                                                width: 140px;
+                                                label: "目标类型";
+                                                model: ["text", "int", "float", "bool", "time"];
+                                                value <=> FormState.cast-target;
+                                            }
+
+                                            if FormState.value-operation == "数值保留小数位": LabeledField {
+                                                width: 180px;
+                                                label: "数值列";
+                                                placeholder: "temperature";
+                                                text <=> FormState.round-column;
+                                            }
+
+                                            if FormState.value-operation == "数值保留小数位": LabeledField {
+                                                width: 96px;
+                                                label: "位数";
+                                                placeholder: "2";
+                                                text <=> FormState.round-digits;
+                                            }
+
+                                            InlineActionButton {
+                                                width: 88px;
+                                                label: "执行";
+                                                pressed => { Logic.apply-value-operation(); }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: transparent;
+                                    }
+                                }
+                            }
+
+                            aggregate-page := Rectangle {
+                                visible: root.active-tab == 3;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: transparent;
+                                clip: true;
+
+                                VerticalBox {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: 0px;
+                                    spacing: 8px;
+
+                                    Panel {
+                                        title: "分组与聚合";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 260px;
+                                                    label: "分组字段";
+                                                    placeholder: "device_id,status";
+                                                    text <=> FormState.aggregate-group-columns;
+                                                }
+
+                                                LabeledChoice {
+                                                    width: 140px;
+                                                    label: "聚合方式";
+                                                    model: ["计数", "去重计数", "求和", "平均值", "最大值", "最小值"];
+                                                    value <=> FormState.aggregate-function;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 88px;
+                                                    label: "执行";
+                                                    primary: true;
+                                                    pressed => { Logic.apply-group-aggregate(); }
+                                                }
+                                            }
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 260px;
+                                                    label: "目标字段";
+                                                    placeholder: "value";
+                                                    text <=> FormState.aggregate-target-column;
+                                                }
+
+                                                Text {
+                                                    vertical-alignment: center;
+                                                    color: AppTheme.text-soft;
+                                                    font-size: 10px;
+                                                    text: "计数可留空，其余聚合建议填写数值列。";
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: transparent;
+                                    }
+                                }
+                            }
+
+                            join-page := Rectangle {
+                                visible: root.active-tab == 4;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: transparent;
+                                clip: true;
+
+                                VerticalBox {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: 0px;
+                                    spacing: 8px;
+
+                                    Panel {
+                                        title: "融合建议";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        Rectangle {
+                                            height: 240px;
+                                            background: AppTheme.panel-bg;
+                                            border-width: 1px;
+                                            border-color: AppTheme.border;
+                                            clip: true;
+
+                                            ScrollView {
+                                                join-table := Rectangle {
+                                                    width: 920px;
+                                                    height: join-content.preferred-height;
+                                                    background: AppTheme.panel-bg;
+
+                                                    join-content := VerticalBox {
+                                                        width: parent.width;
+                                                        spacing: 0px;
+
+                                                        HorizontalBox {
+                                                            spacing: 0px;
+                                                            LedgerHeaderCell {
+                                                                cell-width: 180px;
+                                                                label: "目标数据集";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 150px;
+                                                                label: "左表键";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 150px;
+                                                                label: "右表键";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 88px;
+                                                                label: "连接";
+                                                                center: true;
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 350px;
+                                                                label: "原因";
+                                                            }
+                                                        }
+
+                                                        for suggestion in AppState.join-suggestions: JoinRow {
+                                                            target-dataset: suggestion.target-dataset;
+                                                            left-key: suggestion.left-key;
+                                                            right-key: suggestion.right-key;
+                                                            join-type: suggestion.join-type;
+                                                            reason: suggestion.reason;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "手工融合";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 160px;
+                                                    label: "目标数据集编号";
+                                                    placeholder: "2";
+                                                    text <=> FormState.join-dataset-id;
+                                                }
+
+                                                LabeledField {
+                                                    width: 210px;
+                                                    label: "左表键";
+                                                    placeholder: "device_id";
+                                                    text <=> FormState.join-left-key;
+                                                }
+
+                                                LabeledField {
+                                                    width: 210px;
+                                                    label: "右表键";
+                                                    placeholder: "device_id";
+                                                    text <=> FormState.join-right-key;
+                                                }
+                                            }
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledChoice {
+                                                    width: 160px;
+                                                    label: "连接类型";
+                                                    model: ["left", "inner", "outer"];
+                                                    value <=> FormState.join-kind;
+                                                }
+
+                                                InlineActionButton {
+                                                    width: 96px;
+                                                    label: "执行融合";
+                                                    primary: true;
+                                                    pressed => { Logic.apply-join(); }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: transparent;
+                                    }
+                                }
+                            }
+
+                            pipeline-page := Rectangle {
+                                visible: root.active-tab == 5;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: transparent;
+                                clip: true;
+
+                                VerticalBox {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: 0px;
+                                    spacing: 8px;
+
+                                    Panel {
+                                        title: "流程模板";
+                                        subtitle: "";
+                                        horizontal-stretch: 1;
+
+                                        HorizontalBox {
+                                            spacing: 6px;
+
+                                            Button {
+                                                text: "保存流程模板";
+                                                height: 28px;
+                                                clicked => { Logic.save-pipeline-template(); }
+                                            }
+
+                                            Button {
+                                                text: "回放流程模板";
+                                                height: 28px;
+                                                clicked => { Logic.replay-pipeline-template(); }
+                                            }
+
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        title: "流程记录";
+                                        subtitle: "";
+                                        vertical-stretch: 1;
+
+                                        Rectangle {
+                                            min-height: 280px;
+                                            vertical-stretch: 1;
+                                            background: AppTheme.panel-bg;
+                                            border-width: 1px;
+                                            border-color: AppTheme.border;
+                                            clip: true;
+
+                                            ScrollView {
+                                                step-table := Rectangle {
+                                                    width: 948px;
+                                                    height: step-content.preferred-height;
+                                                    background: AppTheme.panel-bg;
+
+                                                    step-content := VerticalBox {
+                                                        width: parent.width;
+                                                        spacing: 0px;
+
+                                                        HorizontalBox {
+                                                            spacing: 0px;
+                                                            LedgerHeaderCell {
+                                                                cell-width: 78px;
+                                                                label: "时间";
+                                                                center: true;
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 160px;
+                                                                label: "动作";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 430px;
+                                                                label: "明细";
+                                                            }
+
+                                                            LedgerHeaderCell {
+                                                                cell-width: 280px;
+                                                                label: "结果";
+                                                            }
+                                                        }
+
+                                                        for step in AppState.steps: StepRow {
+                                                            time: step.time;
+                                                            action: step.action;
+                                                            detail: step.detail;
+                                                            outcome: step.outcome;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
