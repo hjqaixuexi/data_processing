@@ -1065,9 +1065,15 @@ export component MainWindow inherits Window {
                                             clip: true;
 
                                             ScrollView {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                viewport-width: max(self.visible-width, root.issue-table-width);
+                                                viewport-height: max(self.visible-height, issue-content.preferred-height);
                                                 issue-table := Rectangle {
-                                                    width: root.issue-table-width > parent.width ? root.issue-table-width : parent.width;
-                                                    height: issue-content.preferred-height;
+                                                    width: parent.viewport-width;
+                                                    height: parent.viewport-height;
                                                     background: AppTheme.panel-bg;
 
                                                     issue-content := VerticalBox {
