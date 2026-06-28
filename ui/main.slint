@@ -318,6 +318,9 @@ export component MainWindow inherits Window {
     private property <length> table-scrollbar-gutter: 12px;
     private property <length> issue-table-width: 960px;
     private property <length> field-table-width: 812px;
+    private property <length> cleaning-panel-gap: 8px;
+    private property <length> cleaning-bottom-padding: 320px;
+    private property <length> cleaning-content-height: 148px + 168px + 148px + 178px + 172px + 4 * root.cleaning-panel-gap + root.cleaning-bottom-padding;
 
     title: "工程数据处理台";
     preferred-width: 1500px;
@@ -1116,7 +1119,7 @@ export component MainWindow inherits Window {
                                 width: parent.width;
                                 height: parent.height;
                                 background: transparent;
-                                clip: false;
+                                clip: true;
 
                                 cleaning-page-scroll := ScrollView {
                                     x: 0px;
@@ -1126,21 +1129,23 @@ export component MainWindow inherits Window {
                                     horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                                     vertical-scrollbar-policy: ScrollBarPolicy.always-on;
                                     viewport-width: self.visible-width;
-                                    viewport-height: max(self.visible-height, cleaning-scroll-body.preferred-height);
+                                    viewport-height: max(self.visible-height, root.cleaning-content-height);
 
                                     cleaning-scroll-body := Rectangle {
                                         width: cleaning-page-scroll.visible-width;
-                                        height: cleaning-scroll-content.preferred-height;
+                                        height: root.cleaning-content-height;
                                         background: transparent;
 
                                         cleaning-scroll-content := VerticalBox {
                                             width: parent.width;
-                                            spacing: 8px;
+                                            height: parent.height;
+                                            spacing: root.cleaning-panel-gap;
 
                                     Panel {
                                         title: "行处理";
                                         subtitle: "";
                                         horizontal-stretch: 1;
+                                        height: 148px;
 
                                         VerticalBox {
                                             spacing: 6px;
@@ -1242,6 +1247,7 @@ export component MainWindow inherits Window {
                                         title: "列处理";
                                         subtitle: "";
                                         horizontal-stretch: 1;
+                                        height: 168px;
 
                                         VerticalBox {
                                             spacing: 6px;
@@ -1428,6 +1434,7 @@ export component MainWindow inherits Window {
                                         title: "文本处理";
                                         subtitle: "";
                                         horizontal-stretch: 1;
+                                        height: 148px;
 
                                         HorizontalBox {
                                             spacing: 6px;
@@ -1531,6 +1538,7 @@ export component MainWindow inherits Window {
                                         title: "值处理";
                                         subtitle: "";
                                         horizontal-stretch: 1;
+                                        height: 178px;
 
                                         HorizontalBox {
                                             spacing: 6px;
@@ -1689,6 +1697,7 @@ export component MainWindow inherits Window {
                                         title: "时间处理";
                                         subtitle: "";
                                         horizontal-stretch: 1;
+                                        height: 172px;
 
                                         VerticalBox {
                                             spacing: 6px;
@@ -1790,7 +1799,7 @@ export component MainWindow inherits Window {
                                     }
 
                                             Rectangle {
-                                                height: 28px;
+                                                height: root.cleaning-bottom-padding;
                                                 background: transparent;
                                             }
                                         }
