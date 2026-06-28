@@ -317,6 +317,8 @@ export component MainWindow inherits Window {
     private property <length> derive-content-height: 256px + 148px + 188px + 300px + 3 * root.derive-panel-gap + root.derive-bottom-padding;
     private property <length> join-panel-gap: 8px;
     private property <length> join-bottom-padding: 48px;
+    private property <length> pipeline-panel-gap: 8px;
+    private property <length> pipeline-bottom-padding: 48px;
 
     title: "工程数据处理台";
     preferred-width: 1500px;
@@ -2634,97 +2636,114 @@ export component MainWindow inherits Window {
                                 y: 0px;
                                 width: parent.width;
                                 height: parent.height;
-                                background: transparent;
+                                background: AppTheme.window-bg;
                                 clip: true;
 
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    vertical-stretch: 1;
-                                    min-width: 0px;
-                                    min-height: 0px;
-                                    spacing: 8px;
+                                pipeline-page-scroll := ScrollView {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                    vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                    viewport-width: self.visible-width;
+                                    viewport-height: max(self.visible-height, pipeline-scroll-content.preferred-height);
 
-                                    Panel {
-                                        title: "流程模板";
-                                        subtitle: "";
-                                        horizontal-stretch: 1;
+                                    pipeline-scroll-body := Rectangle {
+                                        width: pipeline-page-scroll.visible-width;
+                                        height: max(pipeline-page-scroll.visible-height, pipeline-scroll-content.preferred-height);
+                                        background: transparent;
 
-                                        HorizontalBox {
-                                            spacing: 6px;
+                                        pipeline-scroll-content := VerticalBox {
+                                            width: parent.width;
+                                            spacing: root.pipeline-panel-gap;
 
-                                            Button {
-                                                text: "保存流程模板";
-                                                height: 28px;
-                                                clicked => { Logic.save-pipeline-template(); }
-                                            }
-
-                                            Button {
-                                                text: "回放流程模板";
-                                                height: 28px;
-                                                clicked => { Logic.replay-pipeline-template(); }
-                                            }
-
-                                            Rectangle {
+                                            Panel {
+                                                title: "流程模板";
+                                                subtitle: "";
                                                 horizontal-stretch: 1;
+
+                                                HorizontalBox {
+                                                    spacing: 6px;
+
+                                                    Button {
+                                                        text: "保存流程模板";
+                                                        height: 28px;
+                                                        clicked => { Logic.save-pipeline-template(); }
+                                                    }
+
+                                                    Button {
+                                                        text: "回放流程模板";
+                                                        height: 28px;
+                                                        clicked => { Logic.replay-pipeline-template(); }
+                                                    }
+
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
 
-                                    Panel {
-                                        title: "流程记录";
-                                        subtitle: "";
-                                        vertical-stretch: 1;
+                                            Panel {
+                                                title: "流程记录";
+                                                subtitle: "";
 
-                                        Rectangle {
-                                            min-height: 280px;
-                                            vertical-stretch: 1;
-                                            background: AppTheme.panel-bg;
-                                            border-width: 1px;
-                                            border-color: AppTheme.border;
-                                            clip: true;
+                                                VerticalBox {
+                                                    height: 520px;
+                                                    spacing: 0px;
 
-                                            ScrollView {
-                                                step-table := Rectangle {
-                                                    width: 948px;
-                                                    height: step-content.preferred-height;
-                                                    background: AppTheme.panel-bg;
-
-                                                    step-content := VerticalBox {
-                                                        width: parent.width;
+                                                    HorizontalBox {
                                                         spacing: 0px;
 
-                                                        HorizontalBox {
-                                                            spacing: 0px;
-                                                            LedgerHeaderCell {
-                                                                cell-width: 78px;
-                                                                label: "时间";
-                                                                center: true;
-                                                            }
-
-                                                            LedgerHeaderCell {
-                                                                cell-width: 160px;
-                                                                label: "动作";
-                                                            }
-
-                                                            LedgerHeaderCell {
-                                                                cell-width: 430px;
-                                                                label: "明细";
-                                                            }
-
-                                                            LedgerHeaderCell {
-                                                                cell-width: 280px;
-                                                                label: "结果";
-                                                            }
+                                                        LedgerHeaderCell {
+                                                            cell-width: 78px;
+                                                            label: "时间";
+                                                            center: true;
                                                         }
 
-                                                        for step in AppState.steps: StepRow {
-                                                            time: step.time;
-                                                            action: step.action;
-                                                            detail: step.detail;
-                                                            outcome: step.outcome;
+                                                        LedgerHeaderCell {
+                                                            cell-width: 160px;
+                                                            label: "动作";
+                                                        }
+
+                                                        LedgerHeaderCell {
+                                                            cell-width: 430px;
+                                                            label: "明细";
+                                                        }
+
+                                                        LedgerHeaderCell {
+                                                            cell-width: 280px;
+                                                            label: "结果";
+                                                        }
+                                                    }
+
+                                                    step-scroll := ScrollView {
+                                                        vertical-stretch: 1;
+                                                        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                                        vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                                        viewport-width: step-scroll.visible-width;
+                                                        viewport-height: max(step-scroll.visible-height, step-rows.preferred-height);
+
+                                                        step-rows := VerticalBox {
+                                                            x: 0px;
+                                                            y: 0px;
+                                                            width: step-scroll.visible-width;
+                                                            spacing: 0px;
+
+                                                            for step in AppState.steps: StepRow {
+                                                                time: step.time;
+                                                                action: step.action;
+                                                                detail: step.detail;
+                                                                outcome: step.outcome;
+                                                            }
                                                         }
                                                     }
                                                 }
+                                            }
+
+                                            Rectangle {
+                                                height: root.pipeline-bottom-padding;
+                                                background: transparent;
                                             }
                                         }
                                     }
