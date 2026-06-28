@@ -712,6 +712,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             format: snapshot.format.into(),
             size_label: snapshot.size_label.into(),
             imported_at: snapshot.imported_at.into(),
+            import_duration: snapshot.import_duration.into(),
             sheet_name: snapshot.sheet_name.into(),
             overview: snapshot.overview.into(),
             key_hint: snapshot.key_hint.into(),

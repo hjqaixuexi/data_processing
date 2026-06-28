@@ -337,6 +337,7 @@ pub struct DatasetRecord {
     pub format: FileFormat,
     pub size_bytes: u64,
     pub imported_at: DateTime<Local>,
+    pub import_duration_ms: Option<u64>,
     pub sheet_name: Option<String>,
     pub source_table: DataTable,
     pub working_table: DataTable,
@@ -600,6 +601,7 @@ pub struct LoadedDataset {
     pub format: FileFormat,
     pub size_bytes: u64,
     pub imported_at: DateTime<Local>,
+    pub import_duration_ms: Option<u64>,
     pub sheet_name: Option<String>,
     pub table: DataTable,
 }
@@ -611,6 +613,7 @@ pub struct DatasetSnapshot {
     pub format: String,
     pub size_label: String,
     pub imported_at: String,
+    pub import_duration: String,
     pub sheet_name: String,
     pub overview: String,
     pub key_hint: String,
@@ -632,6 +635,24 @@ pub fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{value:.2} {}", UNITS[unit_index])
     }
+}
+
+pub fn format_duration_millis(duration_ms: Option<u64>) -> String {
+    let Some(duration_ms) = duration_ms else {
+        return "耗时 -".to_string();
+    };
+
+    if duration_ms < 1_000 {
+        return format!("耗时 {} ms", duration_ms);
+    }
+
+    if duration_ms < 60_000 {
+        return format!("耗时 {:.2} s", duration_ms as f64 / 1_000.0);
+    }
+
+    let minutes = duration_ms / 60_000;
+    let seconds = (duration_ms % 60_000) as f64 / 1_000.0;
+    format!("耗时 {} min {:.1} s", minutes, seconds)
 }
 
 pub fn parse_bool(value: &str) -> Option<bool> {

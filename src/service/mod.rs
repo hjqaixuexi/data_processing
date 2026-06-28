@@ -4,7 +4,7 @@ use crate::loader;
 use crate::model::{
     AggregateFunction, DatasetHistory, DatasetRecord, DatasetSnapshot, FileFormat, JoinKind,
     LoadedDataset, LogicalType, PipelineOperation, PipelineStep, QualityRules, TextCaseMode,
-    format_bytes,
+    format_bytes, format_duration_millis,
 };
 use crate::pipeline;
 use crate::processor;
@@ -50,6 +50,7 @@ impl AppService {
                 format: record.format.as_str().to_string(),
                 size_label: format_bytes(record.size_bytes),
                 imported_at: record.imported_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+                import_duration: format_duration_millis(record.import_duration_ms),
                 sheet_name: record.sheet_name.clone().unwrap_or_default(),
                 overview: format!("{} 行 × {} 列", record.profile.row_count, record.profile.column_count),
                 key_hint: if !record.profile.resolved_primary_key.is_empty() {
@@ -470,6 +471,7 @@ impl AppService {
             format: FileFormat::Json,
             size_bytes: 0,
             imported_at: Local::now(),
+            import_duration_ms: None,
             sheet_name: None,
             source_table: joined.clone(),
             working_table: joined,
@@ -585,6 +587,7 @@ impl AppService {
             format: dataset.format,
             size_bytes: dataset.size_bytes,
             imported_at: dataset.imported_at,
+            import_duration_ms: dataset.import_duration_ms,
             sheet_name: dataset.sheet_name,
             source_table: dataset.table.clone(),
             working_table: dataset.table,

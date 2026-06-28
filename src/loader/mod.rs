@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 pub fn load_paths(paths: &[PathBuf]) -> Result<Vec<LoadedDataset>> {
     let mut datasets = Vec::new();
@@ -19,12 +20,18 @@ pub fn load_paths(paths: &[PathBuf]) -> Result<Vec<LoadedDataset>> {
         let format = FileFormat::from_path(path)?;
         let metadata = fs::metadata(path)
             .with_context(|| format!("无法读取文件元信息: {}", path.display()))?;
+        let started_at = Instant::now();
 
-        match format {
-            FileFormat::Csv => datasets.push(load_csv(path, metadata.len())?),
-            FileFormat::Json => datasets.push(load_json(path, metadata.len())?),
-            FileFormat::Xlsx => datasets.extend(load_xlsx(path, metadata.len())?),
+        let mut loaded = match format {
+            FileFormat::Csv => vec![load_csv(path, metadata.len())?],
+            FileFormat::Json => vec![load_json(path, metadata.len())?],
+            FileFormat::Xlsx => load_xlsx(path, metadata.len())?,
+        };
+        let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        for dataset in &mut loaded {
+            dataset.import_duration_ms = Some(elapsed_ms);
         }
+        datasets.extend(loaded);
     }
 
     if datasets.is_empty() {
@@ -76,6 +83,7 @@ fn load_csv(path: &Path, size_bytes: u64) -> Result<LoadedDataset> {
         format: FileFormat::Csv,
         size_bytes,
         imported_at: Local::now(),
+        import_duration_ms: None,
         sheet_name: None,
         table,
     })
@@ -119,6 +127,7 @@ fn load_json(path: &Path, size_bytes: u64) -> Result<LoadedDataset> {
         format: FileFormat::Json,
         size_bytes,
         imported_at: Local::now(),
+        import_duration_ms: None,
         sheet_name: None,
         table: build_table(headers, rows),
     })
@@ -170,6 +179,7 @@ fn load_xlsx(path: &Path, size_bytes: u64) -> Result<Vec<LoadedDataset>> {
             format: FileFormat::Xlsx,
             size_bytes,
             imported_at: Local::now(),
+            import_duration_ms: None,
             sheet_name: Some(sheet_name),
             table,
         });

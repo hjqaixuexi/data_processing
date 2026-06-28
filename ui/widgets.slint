@@ -119,7 +119,7 @@ export component DatasetRow inherits Rectangle {
             }
 
             Text {
-                text: dataset.imported-at;
+                text: dataset.imported-at + " | " + dataset.import-duration;
                 color: AppTheme.text-muted;
                 font-size: 9px;
             }
