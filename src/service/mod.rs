@@ -2,9 +2,10 @@ use crate::exporter;
 use crate::inspector;
 use crate::loader;
 use crate::model::{
-    AggregateFunction, DatasetHistory, DatasetRecord, DatasetSnapshot, FileFormat, JoinKind,
-    LoadedDataset, LogicalType, PipelineOperation, PipelineStep, QualityRules, StatisticFillStrategy, TextCaseMode,
-    format_bytes, format_duration_millis,
+    AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetHistory, DatasetRecord,
+    DatasetSnapshot, FileFormat, JoinKind, LoadedDataset, LogicalType, PipelineOperation,
+    PipelineStep, PriorityPlacement, QualityRules, StatisticFillStrategy, TextCaseMode,
+    TimeDiffUnit, format_bytes, format_duration_millis,
 };
 use crate::pipeline;
 use crate::processor;
@@ -311,6 +312,77 @@ impl AppService {
         )
     }
 
+    pub fn add_constant_column(&mut self, target: &str, value: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddConstantColumn {
+                target: target.trim().to_string(),
+                value: value.to_string(),
+            },
+            "新增整列相同的常量值字段",
+        )
+    }
+
+    pub fn add_expression_column(&mut self, target: &str, expression: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddExpressionColumn {
+                target: target.trim().to_string(),
+                expression: expression.trim().to_string(),
+            },
+            "按表达式计算生成新列，支持 {列名} 引用",
+        )
+    }
+
+    pub fn add_conditional_column(
+        &mut self,
+        target: &str,
+        source_column: &str,
+        operator: CompareOperator,
+        compare_value: &str,
+        true_value: &str,
+        false_value: &str,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddConditionalColumn {
+                target: target.trim().to_string(),
+                source_column: source_column.trim().to_string(),
+                operator,
+                compare_value: compare_value.to_string(),
+                true_value: true_value.to_string(),
+                false_value: false_value.to_string(),
+            },
+            "根据字段条件生成判断列",
+        )
+    }
+
+    pub fn concat_columns(&mut self, columns: Vec<String>, target: &str, separator: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ConcatColumns {
+                columns,
+                target: target.trim().to_string(),
+                separator: separator.to_string(),
+            },
+            "按顺序拼接多个字段生成新列",
+        )
+    }
+
+    pub fn add_time_diff_column(
+        &mut self,
+        start_column: &str,
+        end_column: &str,
+        target: &str,
+        unit: TimeDiffUnit,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddTimeDiffColumn {
+                start_column: start_column.trim().to_string(),
+                end_column: end_column.trim().to_string(),
+                target: target.trim().to_string(),
+                unit,
+            },
+            "根据开始时间和结束时间生成时间差列",
+        )
+    }
+
     pub fn sort_by(&mut self, column: &str, ascending: bool) -> Result<String> {
         self.apply_operation(
             PipelineOperation::SortBy {
@@ -318,6 +390,51 @@ impl AppService {
                 ascending,
             },
             "按指定列重新排序记录",
+        )
+    }
+
+    pub fn multi_sort(&mut self, columns: Vec<String>, ascending: Vec<bool>) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::MultiSort { columns, ascending },
+            "按多个字段依次排序当前数据集",
+        )
+    }
+
+    pub fn priority_sort(
+        &mut self,
+        column: &str,
+        operator: CompareOperator,
+        value: &str,
+        placement: PriorityPlacement,
+        secondary_columns: Vec<String>,
+        secondary_ascending: Vec<bool>,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::PrioritySort {
+                column: column.trim().to_string(),
+                operator,
+                value: value.to_string(),
+                placement,
+                secondary_columns,
+                secondary_ascending,
+            },
+            "将命中特定条件的记录优先置前或置后",
+        )
+    }
+
+    pub fn add_rank_column(
+        &mut self,
+        target: &str,
+        columns: Vec<String>,
+        ascending: Vec<bool>,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddRankColumn {
+                target: target.trim().to_string(),
+                columns,
+                ascending,
+            },
+            "按排序字段生成排名列",
         )
     }
 
@@ -779,6 +896,86 @@ impl AppService {
                 function,
             },
             "按字段分组并生成聚合结果表",
+        )
+    }
+
+    pub fn rolling_aggregate(
+        &mut self,
+        group_columns: Vec<String>,
+        order_column: &str,
+        target_column: &str,
+        window_size: usize,
+        function: AggregateFunction,
+        output_column: &str,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::RollingAggregate {
+                group_columns,
+                order_column: order_column.trim().to_string(),
+                target_column: target_column.trim().to_string(),
+                window_size,
+                function,
+                output_column: output_column.trim().to_string(),
+            },
+            "按排序列执行滚动窗口统计并生成新列",
+        )
+    }
+
+    pub fn cumulative_sum(
+        &mut self,
+        group_columns: Vec<String>,
+        order_column: &str,
+        target_column: &str,
+        output_column: &str,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::CumulativeSum {
+                group_columns,
+                order_column: order_column.trim().to_string(),
+                target_column: target_column.trim().to_string(),
+                output_column: output_column.trim().to_string(),
+            },
+            "按排序列计算累积和并生成新列",
+        )
+    }
+
+    pub fn moving_average(
+        &mut self,
+        group_columns: Vec<String>,
+        order_column: &str,
+        target_column: &str,
+        window_size: usize,
+        output_column: &str,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::MovingAverage {
+                group_columns,
+                order_column: order_column.trim().to_string(),
+                target_column: target_column.trim().to_string(),
+                window_size,
+                output_column: output_column.trim().to_string(),
+            },
+            "按排序列计算滑动平均并生成新列",
+        )
+    }
+
+    pub fn compare_adjacent(
+        &mut self,
+        group_columns: Vec<String>,
+        order_column: &str,
+        target_column: &str,
+        mode: AdjacentCompareMode,
+        output_column: &str,
+    ) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::CompareAdjacent {
+                group_columns,
+                order_column: order_column.trim().to_string(),
+                target_column: target_column.trim().to_string(),
+                mode,
+                output_column: output_column.trim().to_string(),
+            },
+            "按排序列比较相邻记录并生成派生列",
         )
     }
 

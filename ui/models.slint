@@ -175,6 +175,45 @@ export global FormState {
     in-out property <string> aggregate-group-columns;
     in-out property <string> aggregate-target-column;
     in-out property <string> aggregate-function: "计数";
+    in-out property <string> derive-column-operation: "常量列";
+    in-out property <string> derive-constant-target;
+    in-out property <string> derive-constant-value;
+    in-out property <string> derive-expression-target;
+    in-out property <string> derive-expression;
+    in-out property <string> derive-condition-target;
+    in-out property <string> derive-condition-source-column;
+    in-out property <string> derive-condition-operator: "=";
+    in-out property <string> derive-condition-value;
+    in-out property <string> derive-condition-true-value: "1";
+    in-out property <string> derive-condition-false-value: "0";
+    in-out property <string> derive-concat-columns;
+    in-out property <string> derive-concat-target;
+    in-out property <string> derive-concat-separator: "_";
+    in-out property <string> derive-time-diff-start-column;
+    in-out property <string> derive-time-diff-end-column;
+    in-out property <string> derive-time-diff-target;
+    in-out property <string> derive-time-diff-unit: "分钟";
+    in-out property <string> derive-group-columns;
+    in-out property <string> derive-group-target-column;
+    in-out property <string> derive-group-function: "计数";
+    in-out property <string> derive-sort-operation: "单列排序";
+    in-out property <string> derive-sort-column;
+    in-out property <bool> derive-sort-ascending: true;
+    in-out property <string> derive-sort-columns;
+    in-out property <string> derive-sort-orders: "升序";
+    in-out property <string> derive-priority-column;
+    in-out property <string> derive-priority-operator: "=";
+    in-out property <string> derive-priority-value;
+    in-out property <string> derive-priority-placement: "优先置前";
+    in-out property <string> derive-rank-output-column: "rank";
+    in-out property <string> derive-window-operation: "滚动统计";
+    in-out property <string> derive-window-order-column;
+    in-out property <string> derive-window-group-columns;
+    in-out property <string> derive-window-target-column;
+    in-out property <string> derive-window-output-column;
+    in-out property <string> derive-window-size: "3";
+    in-out property <string> derive-window-function: "求和";
+    in-out property <string> derive-window-compare-mode: "差值";
 }
 
 export global Logic {
@@ -216,6 +255,10 @@ export global Logic {
     callback apply-replace-text();
     callback apply-round-numeric();
     callback apply-group-aggregate();
+    callback apply-derive-column();
+    callback apply-derive-group();
+    callback apply-derive-sort();
+    callback apply-derive-window();
     callback apply-recommended-mapping();
     callback apply-join();
     callback export-csv();

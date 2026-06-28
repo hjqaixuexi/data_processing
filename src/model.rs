@@ -446,6 +446,124 @@ impl AggregateFunction {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CompareOperator {
+    Eq,
+    NotEq,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    Contains,
+    IsEmpty,
+}
+
+impl CompareOperator {
+    pub fn from_text(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "!=" | "<>" | "不等于" => Self::NotEq,
+            ">" | "大于" => Self::Greater,
+            ">=" | "大于等于" => Self::GreaterEqual,
+            "<" | "小于" => Self::Less,
+            "<=" | "小于等于" => Self::LessEqual,
+            "contains" | "包含" => Self::Contains,
+            "empty" | "is_empty" | "为空" => Self::IsEmpty,
+            _ => Self::Eq,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Eq => "=",
+            Self::NotEq => "!=",
+            Self::Greater => ">",
+            Self::GreaterEqual => ">=",
+            Self::Less => "<",
+            Self::LessEqual => "<=",
+            Self::Contains => "包含",
+            Self::IsEmpty => "为空",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum TimeDiffUnit {
+    Seconds,
+    Minutes,
+    Hours,
+    Days,
+}
+
+impl TimeDiffUnit {
+    pub fn from_text(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "秒" | "second" | "seconds" => Self::Seconds,
+            "小时" | "hour" | "hours" => Self::Hours,
+            "天" | "day" | "days" => Self::Days,
+            _ => Self::Minutes,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Seconds => "秒",
+            Self::Minutes => "分钟",
+            Self::Hours => "小时",
+            Self::Days => "天",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PriorityPlacement {
+    First,
+    Last,
+}
+
+impl PriorityPlacement {
+    pub fn from_text(value: &str) -> Self {
+        match value.trim() {
+            "优先置后" => Self::Last,
+            _ => Self::First,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::First => "优先置前",
+            Self::Last => "优先置后",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum AdjacentCompareMode {
+    Difference,
+    ChangeRate,
+    IncreaseFlag,
+    DecreaseFlag,
+}
+
+impl AdjacentCompareMode {
+    pub fn from_text(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "变化率" | "rate" => Self::ChangeRate,
+            "是否上升" | "increase" => Self::IncreaseFlag,
+            "是否下降" | "decrease" => Self::DecreaseFlag,
+            _ => Self::Difference,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Difference => "差值",
+            Self::ChangeRate => "变化率",
+            Self::IncreaseFlag => "是否上升",
+            Self::DecreaseFlag => "是否下降",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StatisticFillStrategy {
     Mean,
     Median,
@@ -539,9 +657,53 @@ pub enum PipelineOperation {
         column: String,
         start: usize,
     },
+    AddConstantColumn {
+        target: String,
+        value: String,
+    },
+    AddExpressionColumn {
+        target: String,
+        expression: String,
+    },
+    AddConditionalColumn {
+        target: String,
+        source_column: String,
+        operator: CompareOperator,
+        compare_value: String,
+        true_value: String,
+        false_value: String,
+    },
+    ConcatColumns {
+        columns: Vec<String>,
+        target: String,
+        separator: String,
+    },
+    AddTimeDiffColumn {
+        start_column: String,
+        end_column: String,
+        target: String,
+        unit: TimeDiffUnit,
+    },
     SortBy {
         column: String,
         ascending: bool,
+    },
+    MultiSort {
+        columns: Vec<String>,
+        ascending: Vec<bool>,
+    },
+    PrioritySort {
+        column: String,
+        operator: CompareOperator,
+        value: String,
+        placement: PriorityPlacement,
+        secondary_columns: Vec<String>,
+        secondary_ascending: Vec<bool>,
+    },
+    AddRankColumn {
+        target: String,
+        columns: Vec<String>,
+        ascending: Vec<bool>,
     },
     FillNullText {
         column: String,
@@ -684,6 +846,34 @@ pub enum PipelineOperation {
         group_columns: Vec<String>,
         target_column: String,
         function: AggregateFunction,
+    },
+    RollingAggregate {
+        group_columns: Vec<String>,
+        order_column: String,
+        target_column: String,
+        window_size: usize,
+        function: AggregateFunction,
+        output_column: String,
+    },
+    CumulativeSum {
+        group_columns: Vec<String>,
+        order_column: String,
+        target_column: String,
+        output_column: String,
+    },
+    MovingAverage {
+        group_columns: Vec<String>,
+        order_column: String,
+        target_column: String,
+        window_size: usize,
+        output_column: String,
+    },
+    CompareAdjacent {
+        group_columns: Vec<String>,
+        order_column: String,
+        target_column: String,
+        mode: AdjacentCompareMode,
+        output_column: String,
     },
     ApplyMappings {
         mappings: Vec<(String, String)>,
@@ -857,6 +1047,134 @@ impl fmt::Display for PipelineOperation {
                     )
                 }
             }
+            Self::AddConstantColumn { target, value } => {
+                write!(formatter, "常量列 {} = {}", target, value)
+            }
+            Self::AddExpressionColumn { target, expression } => {
+                write!(formatter, "表达式列 {} = {}", target, expression)
+            }
+            Self::AddConditionalColumn {
+                target,
+                source_column,
+                operator,
+                compare_value,
+                ..
+            } => write!(
+                formatter,
+                "条件判断列 {}: {} {} {}",
+                target,
+                source_column,
+                operator.as_str(),
+                compare_value
+            ),
+            Self::ConcatColumns { columns, target, .. } => {
+                write!(formatter, "拼接列 {} -> {}", columns.join(", "), target)
+            }
+            Self::AddTimeDiffColumn {
+                start_column,
+                end_column,
+                target,
+                unit,
+            } => write!(
+                formatter,
+                "时间差列 {} = {} - {} ({})",
+                target,
+                end_column,
+                start_column,
+                unit.as_str()
+            ),
+            Self::MultiSort { columns, ascending } => {
+                let detail = columns
+                    .iter()
+                    .enumerate()
+                    .map(|(index, column)| {
+                        format!(
+                            "{} {}",
+                            column,
+                            if ascending.get(index).copied().unwrap_or(true) {
+                                "升序"
+                            } else {
+                                "降序"
+                            }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(formatter, "多列排序 {}", detail)
+            }
+            Self::PrioritySort {
+                column,
+                operator,
+                value,
+                placement,
+                ..
+            } => write!(
+                formatter,
+                "条件优先排序 {} {} {} ({})",
+                column,
+                operator.as_str(),
+                value,
+                placement.as_str()
+            ),
+            Self::AddRankColumn { target, columns, .. } => {
+                write!(formatter, "生成排名列 {} by {}", target, columns.join(", "))
+            }
+            Self::RollingAggregate {
+                order_column,
+                target_column,
+                window_size,
+                function,
+                output_column,
+                ..
+            } => write!(
+                formatter,
+                "滚动统计 {} by {} -> {} (窗口 {}, {})",
+                target_column,
+                order_column,
+                output_column,
+                window_size,
+                function.as_str()
+            ),
+            Self::CumulativeSum {
+                order_column,
+                target_column,
+                output_column,
+                ..
+            } => write!(
+                formatter,
+                "累积和 {} by {} -> {}",
+                target_column,
+                order_column,
+                output_column
+            ),
+            Self::MovingAverage {
+                order_column,
+                target_column,
+                window_size,
+                output_column,
+                ..
+            } => write!(
+                formatter,
+                "滑动平均 {} by {} -> {} (窗口 {})",
+                target_column,
+                order_column,
+                output_column,
+                window_size
+            ),
+            Self::CompareAdjacent {
+                order_column,
+                target_column,
+                mode,
+                output_column,
+                ..
+            } => write!(
+                formatter,
+                "邻近值比较 {} by {} -> {} ({})",
+                target_column,
+                order_column,
+                output_column,
+                mode.as_str()
+            ),
             Self::ApplyMappings { mappings } => {
                 write!(formatter, "应用推荐映射 {} 项", mappings.len())
             }

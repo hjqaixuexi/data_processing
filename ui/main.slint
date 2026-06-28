@@ -321,6 +321,9 @@ export component MainWindow inherits Window {
     private property <length> cleaning-panel-gap: 8px;
     private property <length> cleaning-bottom-padding: 320px;
     private property <length> cleaning-content-height: 148px + 168px + 148px + 178px + 172px + 4 * root.cleaning-panel-gap + root.cleaning-bottom-padding;
+    private property <length> derive-panel-gap: 8px;
+    private property <length> derive-bottom-padding: 260px;
+    private property <length> derive-content-height: 208px + 148px + 188px + 214px + 3 * root.derive-panel-gap + root.derive-bottom-padding;
 
     title: "工程数据处理台";
     preferred-width: 1500px;
@@ -512,7 +515,7 @@ export component MainWindow inherits Window {
                         }
 
                         TabButton {
-                            label: "聚合";
+                            label: "派生";
                             selected: root.active-tab == 3;
                             pressed => { root.active-tab = 3; }
                         }
@@ -1885,6 +1888,479 @@ export component MainWindow inherits Window {
                                     Rectangle {
                                         vertical-stretch: 1;
                                         background: transparent;
+                                    }
+                                }
+                            }
+
+                            derive-page := Rectangle {
+                                visible: root.active-tab == 3;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: AppTheme.window-bg;
+                                clip: true;
+
+                                derive-page-scroll := ScrollView {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                    vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                    viewport-width: self.visible-width;
+                                    viewport-height: max(self.visible-height, root.derive-content-height);
+
+                                    derive-scroll-body := Rectangle {
+                                        width: derive-page-scroll.visible-width;
+                                        height: root.derive-content-height;
+                                        background: transparent;
+
+                                        derive-scroll-content := VerticalBox {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            spacing: root.derive-panel-gap;
+
+                                            Panel {
+                                                title: "新列生成";
+                                                subtitle: "";
+                                                horizontal-stretch: 1;
+                                                height: 208px;
+
+                                                VerticalBox {
+                                                    spacing: 6px;
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledChoice {
+                                                            width: 180px;
+                                                            label: "动作";
+                                                            model: ["常量列", "表达式计算列", "条件判断列", "拼接列", "时间差列"];
+                                                            value <=> FormState.derive-column-operation;
+                                                        }
+
+                                                        Rectangle {
+                                                            horizontal-stretch: 1;
+                                                            min-width: 0px;
+                                                        }
+
+                                                        InlineActionButton {
+                                                            width: 88px;
+                                                            label: "执行";
+                                                            primary: true;
+                                                            pressed => { Logic.apply-derive-column(); }
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-column-operation == "常量列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "列名";
+                                                            placeholder: "source_name";
+                                                            text <=> FormState.derive-constant-target;
+                                                        }
+
+                                                        LabeledField {
+                                                            horizontal-stretch: 1;
+                                                            label: "常量值";
+                                                            placeholder: "offline";
+                                                            text <=> FormState.derive-constant-value;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-column-operation == "表达式计算列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "输出列";
+                                                            placeholder: "total_value";
+                                                            text <=> FormState.derive-expression-target;
+                                                        }
+
+                                                        LabeledField {
+                                                            horizontal-stretch: 1;
+                                                            label: "表达式";
+                                                            placeholder: "{price} * {qty}";
+                                                            text <=> FormState.derive-expression;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-column-operation == "表达式计算列": Text {
+                                                        color: AppTheme.text-soft;
+                                                        font-size: 10px;
+                                                        text: "用 {列名} 引用字段，支持 + - * / 和括号。";
+                                                    }
+
+                                                    if FormState.derive-column-operation == "条件判断列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 150px;
+                                                            label: "输出列";
+                                                            placeholder: "status_flag";
+                                                            text <=> FormState.derive-condition-target;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 150px;
+                                                            label: "条件列";
+                                                            placeholder: "score";
+                                                            text <=> FormState.derive-condition-source-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            width: 110px;
+                                                            label: "运算符";
+                                                            model: ["=", "!=", ">", ">=", "<", "<=", "包含", "为空"];
+                                                            value <=> FormState.derive-condition-operator;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 140px;
+                                                            label: "条件值";
+                                                            placeholder: "60";
+                                                            text <=> FormState.derive-condition-value;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-column-operation == "条件判断列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 150px;
+                                                            label: "命中值";
+                                                            placeholder: "合格";
+                                                            text <=> FormState.derive-condition-true-value;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 150px;
+                                                            label: "未命中值";
+                                                            placeholder: "不合格";
+                                                            text <=> FormState.derive-condition-false-value;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-column-operation == "拼接列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            horizontal-stretch: 1;
+                                                            label: "来源列";
+                                                            placeholder: "province,city";
+                                                            text <=> FormState.derive-concat-columns;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 96px;
+                                                            label: "分隔符";
+                                                            placeholder: "_";
+                                                            text <=> FormState.derive-concat-separator;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "输出列";
+                                                            placeholder: "location";
+                                                            text <=> FormState.derive-concat-target;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-column-operation == "时间差列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 160px;
+                                                            label: "开始列";
+                                                            placeholder: "start_time";
+                                                            text <=> FormState.derive-time-diff-start-column;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 160px;
+                                                            label: "结束列";
+                                                            placeholder: "end_time";
+                                                            text <=> FormState.derive-time-diff-end-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            width: 120px;
+                                                            label: "单位";
+                                                            model: ["分钟", "小时", "天", "秒"];
+                                                            value <=> FormState.derive-time-diff-unit;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 160px;
+                                                            label: "输出列";
+                                                            placeholder: "duration_min";
+                                                            text <=> FormState.derive-time-diff-target;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Panel {
+                                                title: "分组与聚合";
+                                                subtitle: "";
+                                                horizontal-stretch: 1;
+                                                height: 148px;
+
+                                                VerticalBox {
+                                                    spacing: 6px;
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 260px;
+                                                            label: "分组字段";
+                                                            placeholder: "device_id,status";
+                                                            text <=> FormState.derive-group-columns;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            width: 140px;
+                                                            label: "聚合方式";
+                                                            model: ["计数", "去重计数", "求和", "平均值", "最大值", "最小值"];
+                                                            value <=> FormState.derive-group-function;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 220px;
+                                                            label: "目标字段";
+                                                            placeholder: "value";
+                                                            text <=> FormState.derive-group-target-column;
+                                                        }
+
+                                                        InlineActionButton {
+                                                            width: 88px;
+                                                            label: "执行";
+                                                            primary: true;
+                                                            pressed => { Logic.apply-derive-group(); }
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        color: AppTheme.text-soft;
+                                                        font-size: 10px;
+                                                        text: "计数可以留空目标字段，其余聚合建议填写数值列。";
+                                                    }
+                                                }
+                                            }
+
+                                            Panel {
+                                                title: "排序与排名";
+                                                subtitle: "";
+                                                horizontal-stretch: 1;
+                                                height: 188px;
+
+                                                VerticalBox {
+                                                    spacing: 6px;
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledChoice {
+                                                            width: 180px;
+                                                            label: "动作";
+                                                            model: ["单列排序", "多列排序", "条件优先排序", "生成排名列"];
+                                                            value <=> FormState.derive-sort-operation;
+                                                        }
+
+                                                        Rectangle {
+                                                            horizontal-stretch: 1;
+                                                            min-width: 0px;
+                                                        }
+
+                                                        InlineActionButton {
+                                                            width: 88px;
+                                                            label: "执行";
+                                                            primary: true;
+                                                            pressed => { Logic.apply-derive-sort(); }
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-sort-operation == "单列排序": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 220px;
+                                                            label: "排序列";
+                                                            placeholder: "event_time";
+                                                            text <=> FormState.derive-sort-column;
+                                                        }
+
+                                                        InlineToggleButton {
+                                                            width: 88px;
+                                                            label: FormState.derive-sort-ascending ? "升序" : "降序";
+                                                            checked <=> FormState.derive-sort-ascending;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-sort-operation == "多列排序" || FormState.derive-sort-operation == "条件优先排序" || FormState.derive-sort-operation == "生成排名列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            horizontal-stretch: 1;
+                                                            label: "排序列";
+                                                            placeholder: "event_time,device_id";
+                                                            text <=> FormState.derive-sort-columns;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 220px;
+                                                            label: "排序方向";
+                                                            placeholder: "升序,降序";
+                                                            text <=> FormState.derive-sort-orders;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-sort-operation == "条件优先排序": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 160px;
+                                                            label: "条件列";
+                                                            placeholder: "priority_flag";
+                                                            text <=> FormState.derive-priority-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            width: 110px;
+                                                            label: "运算符";
+                                                            model: ["=", "!=", ">", ">=", "<", "<=", "包含", "为空"];
+                                                            value <=> FormState.derive-priority-operator;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 140px;
+                                                            label: "条件值";
+                                                            placeholder: "1";
+                                                            text <=> FormState.derive-priority-value;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            width: 120px;
+                                                            label: "位置";
+                                                            model: ["优先置前", "优先置后"];
+                                                            value <=> FormState.derive-priority-placement;
+                                                        }
+                                                    }
+
+                                                    if FormState.derive-sort-operation == "生成排名列": HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "输出列";
+                                                            placeholder: "rank";
+                                                            text <=> FormState.derive-rank-output-column;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Panel {
+                                                title: "窗口类处理";
+                                                subtitle: "";
+                                                horizontal-stretch: 1;
+                                                height: 214px;
+
+                                                VerticalBox {
+                                                    spacing: 6px;
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledChoice {
+                                                            width: 180px;
+                                                            label: "动作";
+                                                            model: ["滚动统计", "累积和", "滑动平均", "邻近值比较"];
+                                                            value <=> FormState.derive-window-operation;
+                                                        }
+
+                                                        Rectangle {
+                                                            horizontal-stretch: 1;
+                                                            min-width: 0px;
+                                                        }
+
+                                                        InlineActionButton {
+                                                            width: 88px;
+                                                            label: "执行";
+                                                            primary: true;
+                                                            pressed => { Logic.apply-derive-window(); }
+                                                        }
+                                                    }
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "排序列";
+                                                            placeholder: "event_time";
+                                                            text <=> FormState.derive-window-order-column;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 220px;
+                                                            label: "分组列";
+                                                            placeholder: "device_id";
+                                                            text <=> FormState.derive-window-group-columns;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "目标列";
+                                                            placeholder: "value";
+                                                            text <=> FormState.derive-window-target-column;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 180px;
+                                                            label: "输出列";
+                                                            placeholder: "value_window";
+                                                            text <=> FormState.derive-window-output-column;
+                                                        }
+                                                    }
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        if FormState.derive-window-operation == "滚动统计" || FormState.derive-window-operation == "滑动平均": LabeledField {
+                                                            width: 120px;
+                                                            label: "窗口大小";
+                                                            placeholder: "3";
+                                                            text <=> FormState.derive-window-size;
+                                                        }
+
+                                                        if FormState.derive-window-operation == "滚动统计": LabeledChoice {
+                                                            width: 140px;
+                                                            label: "统计方式";
+                                                            model: ["求和", "平均值", "最大值", "最小值", "计数", "去重计数"];
+                                                            value <=> FormState.derive-window-function;
+                                                        }
+
+                                                        if FormState.derive-window-operation == "邻近值比较": LabeledChoice {
+                                                            width: 140px;
+                                                            label: "比较方式";
+                                                            model: ["差值", "变化率", "是否上升", "是否下降"];
+                                                            value <=> FormState.derive-window-compare-mode;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                height: root.derive-bottom-padding;
+                                                background: transparent;
+                                            }
+                                        }
                                     }
                                 }
                             }

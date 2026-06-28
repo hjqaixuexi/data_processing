@@ -1,6 +1,6 @@
 use crate::model::{
-    AggregateFunction, DatasetRecord, JoinKind, LogicalType, PreviewRow, StatisticFillStrategy,
-    TextCaseMode, page_window,
+    AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetRecord, JoinKind, LogicalType,
+    PreviewRow, PriorityPlacement, StatisticFillStrategy, TextCaseMode, TimeDiffUnit, page_window,
 };
 use crate::service::AppService;
 use anyhow::Result;
@@ -732,6 +732,166 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
     });
 
     let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_derive_column({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let operation = form.get_derive_column_operation().to_string();
+                let status = match operation.as_str() {
+                    "常量列" => service.add_constant_column(
+                        &form.get_derive_constant_target().to_string(),
+                        &form.get_derive_constant_value().to_string(),
+                    ),
+                    "表达式计算列" => service.add_expression_column(
+                        &form.get_derive_expression_target().to_string(),
+                        &form.get_derive_expression().to_string(),
+                    ),
+                    "条件判断列" => service.add_conditional_column(
+                        &form.get_derive_condition_target().to_string(),
+                        &form.get_derive_condition_source_column().to_string(),
+                        parse_compare_operator(&form.get_derive_condition_operator().to_string()),
+                        &form.get_derive_condition_value().to_string(),
+                        &form.get_derive_condition_true_value().to_string(),
+                        &form.get_derive_condition_false_value().to_string(),
+                    ),
+                    "拼接列" => service.concat_columns(
+                        split_csv_like(&form.get_derive_concat_columns().to_string()),
+                        &form.get_derive_concat_target().to_string(),
+                        &form.get_derive_concat_separator().to_string(),
+                    ),
+                    "时间差列" => service.add_time_diff_column(
+                        &form.get_derive_time_diff_start_column().to_string(),
+                        &form.get_derive_time_diff_end_column().to_string(),
+                        &form.get_derive_time_diff_target().to_string(),
+                        parse_time_diff_unit(&form.get_derive_time_diff_unit().to_string()),
+                    ),
+                    _ => Ok("未识别的新列生成操作".to_string()),
+                }
+                .unwrap_or_else(|error| format!("派生列生成失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_derive_group({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let status = service
+                    .group_aggregate(
+                        split_csv_like(&form.get_derive_group_columns().to_string()),
+                        &form.get_derive_group_target_column().to_string(),
+                        parse_aggregate_function(&form.get_derive_group_function().to_string()),
+                    )
+                    .unwrap_or_else(|error| format!("分组与聚合失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_derive_sort({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let operation = form.get_derive_sort_operation().to_string();
+                let status = match operation.as_str() {
+                    "单列排序" => service.sort_by(
+                        &form.get_derive_sort_column().to_string(),
+                        form.get_derive_sort_ascending(),
+                    ),
+                    "多列排序" => {
+                        let columns = split_csv_like(&form.get_derive_sort_columns().to_string());
+                        let directions = parse_sort_directions(&form.get_derive_sort_orders().to_string(), columns.len());
+                        service.multi_sort(columns, directions)
+                    }
+                    "条件优先排序" => {
+                        let columns = split_csv_like(&form.get_derive_sort_columns().to_string());
+                        let directions = parse_sort_directions(&form.get_derive_sort_orders().to_string(), columns.len());
+                        service.priority_sort(
+                            &form.get_derive_priority_column().to_string(),
+                            parse_compare_operator(&form.get_derive_priority_operator().to_string()),
+                            &form.get_derive_priority_value().to_string(),
+                            parse_priority_placement(&form.get_derive_priority_placement().to_string()),
+                            columns,
+                            directions,
+                        )
+                    }
+                    "生成排名列" => {
+                        let columns = if form.get_derive_sort_columns().to_string().trim().is_empty() {
+                            vec![form.get_derive_sort_column().to_string()]
+                        } else {
+                            split_csv_like(&form.get_derive_sort_columns().to_string())
+                        };
+                        let directions = if form.get_derive_sort_columns().to_string().trim().is_empty() {
+                            vec![form.get_derive_sort_ascending()]
+                        } else {
+                            parse_sort_directions(&form.get_derive_sort_orders().to_string(), columns.len())
+                        };
+                        service.add_rank_column(
+                            &form.get_derive_rank_output_column().to_string(),
+                            columns,
+                            directions,
+                        )
+                    }
+                    _ => Ok("未识别的排序操作".to_string()),
+                }
+                .unwrap_or_else(|error| format!("排序与排名失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_derive_window({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let group_columns = split_csv_like(&form.get_derive_window_group_columns().to_string());
+                let window_size = parse_bounded_usize(&form.get_derive_window_size().to_string(), 3, 1, 9999);
+                let status = match form.get_derive_window_operation().to_string().as_str() {
+                    "滚动统计" => service.rolling_aggregate(
+                        group_columns,
+                        &form.get_derive_window_order_column().to_string(),
+                        &form.get_derive_window_target_column().to_string(),
+                        window_size,
+                        parse_aggregate_function(&form.get_derive_window_function().to_string()),
+                        &form.get_derive_window_output_column().to_string(),
+                    ),
+                    "累积和" => service.cumulative_sum(
+                        group_columns,
+                        &form.get_derive_window_order_column().to_string(),
+                        &form.get_derive_window_target_column().to_string(),
+                        &form.get_derive_window_output_column().to_string(),
+                    ),
+                    "滑动平均" => service.moving_average(
+                        group_columns,
+                        &form.get_derive_window_order_column().to_string(),
+                        &form.get_derive_window_target_column().to_string(),
+                        window_size,
+                        &form.get_derive_window_output_column().to_string(),
+                    ),
+                    "邻近值比较" => service.compare_adjacent(
+                        group_columns,
+                        &form.get_derive_window_order_column().to_string(),
+                        &form.get_derive_window_target_column().to_string(),
+                        parse_adjacent_compare_mode(&form.get_derive_window_compare_mode().to_string()),
+                        &form.get_derive_window_output_column().to_string(),
+                    ),
+                    _ => Ok("未识别的窗口操作".to_string()),
+                }
+                .unwrap_or_else(|error| format!("窗口类处理失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
     ui.global::<Logic>().on_apply_join({
         let service = service.clone();
         move || {
@@ -1176,6 +1336,38 @@ fn parse_logical_type(value: &str) -> LogicalType {
 
 fn parse_aggregate_function(value: &str) -> AggregateFunction {
     AggregateFunction::from_text(value)
+}
+
+fn parse_compare_operator(value: &str) -> CompareOperator {
+    CompareOperator::from_text(value)
+}
+
+fn parse_time_diff_unit(value: &str) -> TimeDiffUnit {
+    TimeDiffUnit::from_text(value)
+}
+
+fn parse_priority_placement(value: &str) -> PriorityPlacement {
+    PriorityPlacement::from_text(value)
+}
+
+fn parse_adjacent_compare_mode(value: &str) -> AdjacentCompareMode {
+    AdjacentCompareMode::from_text(value)
+}
+
+fn parse_sort_directions(value: &str, width: usize) -> Vec<bool> {
+    let parts = split_csv_like(value);
+    if parts.is_empty() {
+        return vec![true; width];
+    }
+    (0..width)
+        .map(|index| {
+            parts
+                .get(index)
+                .or_else(|| parts.last())
+                .map(|item| !matches!(item.trim().to_ascii_lowercase().as_str(), "desc" | "降序"))
+                .unwrap_or(true)
+        })
+        .collect()
 }
 
 fn parse_usize_or_default(value: &str, default_value: usize) -> usize {
