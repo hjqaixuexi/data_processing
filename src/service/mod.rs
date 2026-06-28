@@ -3,7 +3,7 @@ use crate::inspector;
 use crate::loader;
 use crate::model::{
     AggregateFunction, DatasetHistory, DatasetRecord, DatasetSnapshot, FileFormat, JoinKind,
-    LoadedDataset, LogicalType, PipelineOperation, PipelineStep, QualityRules, TextCaseMode,
+    LoadedDataset, LogicalType, PipelineOperation, PipelineStep, QualityRules, StatisticFillStrategy, TextCaseMode,
     format_bytes, format_duration_millis,
 };
 use crate::pipeline;
@@ -203,10 +203,41 @@ impl AppService {
         )
     }
 
+    pub fn keep_rows_with_missing(&mut self, columns: Vec<String>) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::KeepRowsWithMissing { columns },
+            "保留指定字段中存在缺失值的记录",
+        )
+    }
+
     pub fn drop_rows_with_missing(&mut self, columns: Vec<String>) -> Result<String> {
         self.apply_operation(
             PipelineOperation::DropRowsWithMissing { columns },
             "删除指定字段中存在缺失值的记录",
+        )
+    }
+
+    pub fn drop_rows_not_contains(&mut self, column: &str, keyword: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::DropRowsNotContains {
+                column: column.trim().to_string(),
+                keyword: keyword.trim().to_string(),
+            },
+            "删除指定列中不包含关键字的记录",
+        )
+    }
+
+    pub fn drop_row_range(&mut self, start: usize, end: usize) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::DropRowRange { start, end },
+            "按行范围删除记录",
+        )
+    }
+
+    pub fn deduplicate_by_columns(&mut self, columns: Vec<String>) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::DeduplicateByColumns { columns },
+            "按指定字段组合去重，保留首条记录",
         )
     }
 
@@ -226,6 +257,58 @@ impl AppService {
 
     pub fn drop_columns(&mut self, columns: Vec<String>) -> Result<String> {
         self.apply_operation(PipelineOperation::DropColumns { columns }, "删除指定列")
+    }
+
+    pub fn drop_empty_columns(&mut self) -> Result<String> {
+        self.apply_operation(PipelineOperation::DropEmptyColumns, "删除整列为空的字段")
+    }
+
+    pub fn reorder_columns(&mut self, columns: Vec<String>) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ReorderColumns { columns },
+            "按指定顺序重排字段，未列出的字段顺延到后面",
+        )
+    }
+
+    pub fn add_column_name_affix(&mut self, prefix: &str, suffix: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddColumnNameAffix {
+                prefix: prefix.to_string(),
+                suffix: suffix.to_string(),
+            },
+            "批量为字段名添加前后缀",
+        )
+    }
+
+    pub fn duplicate_column(&mut self, source: &str, target: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::DuplicateColumn {
+                source: source.trim().to_string(),
+                target: target.trim().to_string(),
+            },
+            "复制字段生成新列",
+        )
+    }
+
+    pub fn merge_columns(&mut self, columns: Vec<String>, target: &str, separator: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::MergeColumns {
+                columns,
+                target: target.trim().to_string(),
+                separator: separator.to_string(),
+            },
+            "将多个字段合并为一个文本列",
+        )
+    }
+
+    pub fn add_row_number_column(&mut self, column: &str, start: usize) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddRowNumberColumn {
+                column: column.trim().to_string(),
+                start,
+            },
+            "新增行序号列",
+        )
     }
 
     pub fn sort_by(&mut self, column: &str, ascending: bool) -> Result<String> {
@@ -254,6 +337,90 @@ impl AppService {
                 column: column.trim().to_string(),
             },
             "使用前一个有效值向下填充空值",
+        )
+    }
+
+    pub fn fill_null_backward(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::FillNullBackward {
+                column: column.trim().to_string(),
+            },
+            "使用后一个有效值向上回填空值",
+        )
+    }
+
+    pub fn fill_null_statistic(&mut self, column: &str, strategy: StatisticFillStrategy) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::FillNullStatistic {
+                column: column.trim().to_string(),
+                strategy,
+            },
+            "使用统计值填充空值",
+        )
+    }
+
+    pub fn empty_string_to_null(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::EmptyStringToNull {
+                column: column.trim().to_string(),
+            },
+            "将空字符串统一转为空值",
+        )
+    }
+
+    pub fn zero_to_null(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ZeroToNull {
+                column: column.trim().to_string(),
+            },
+            "将零值统一转为空值",
+        )
+    }
+
+    pub fn replace_exact_value(&mut self, column: &str, from: &str, to: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ReplaceExactValue {
+                column: column.trim().to_string(),
+                from: from.to_string(),
+                to: to.to_string(),
+            },
+            "按完整值精确替换字段内容",
+        )
+    }
+
+    pub fn convert_string_to_numeric(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ConvertStringToNumeric {
+                column: column.trim().to_string(),
+            },
+            "将字符串字段转换为数值字段",
+        )
+    }
+
+    pub fn convert_string_to_datetime(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ConvertStringToDateTime {
+                column: column.trim().to_string(),
+            },
+            "将字符串字段转换为日期时间字段",
+        )
+    }
+
+    pub fn convert_integer_to_float(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ConvertIntegerToFloat {
+                column: column.trim().to_string(),
+            },
+            "将整数字段转换为浮点字段",
+        )
+    }
+
+    pub fn convert_to_boolean(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ConvertToBoolean {
+                column: column.trim().to_string(),
+            },
+            "将布尔语义字段统一转换为 true/false",
         )
     }
 
@@ -288,6 +455,75 @@ impl AppService {
         )
     }
 
+    pub fn squeeze_text_whitespace(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::SqueezeTextWhitespace {
+                column: column.trim().to_string(),
+            },
+            "压缩文本中的连续空白",
+        )
+    }
+
+    pub fn remove_text_pattern(&mut self, column: &str, pattern: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::RemoveTextPattern {
+                column: column.trim().to_string(),
+                pattern: pattern.to_string(),
+            },
+            "移除文本中的指定字符或片段",
+        )
+    }
+
+    pub fn extract_text_before(&mut self, column: &str, delimiter: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractTextBefore {
+                column: column.trim().to_string(),
+                delimiter: delimiter.to_string(),
+            },
+            "提取分隔符左侧文本",
+        )
+    }
+
+    pub fn extract_text_after(&mut self, column: &str, delimiter: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractTextAfter {
+                column: column.trim().to_string(),
+                delimiter: delimiter.to_string(),
+            },
+            "提取分隔符右侧文本",
+        )
+    }
+
+    pub fn keep_digits_only(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::KeepDigitsOnly {
+                column: column.trim().to_string(),
+            },
+            "仅保留文本中的数字字符",
+        )
+    }
+
+    pub fn add_text_affix(&mut self, column: &str, prefix: &str, suffix: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::AddTextAffix {
+                column: column.trim().to_string(),
+                prefix: prefix.to_string(),
+                suffix: suffix.to_string(),
+            },
+            "为文本统一添加前后缀",
+        )
+    }
+
+    pub fn truncate_text(&mut self, column: &str, max_chars: usize) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::TruncateText {
+                column: column.trim().to_string(),
+                max_chars,
+            },
+            "按指定长度截断文本",
+        )
+    }
+
     pub fn round_numeric(&mut self, column: &str, digits: usize) -> Result<String> {
         self.apply_operation(
             PipelineOperation::RoundNumeric {
@@ -295,6 +531,146 @@ impl AppService {
                 digits,
             },
             "统一数值保留小数位",
+        )
+    }
+
+    pub fn scale_numeric(&mut self, column: &str, factor: f64) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ScaleNumeric {
+                column: column.trim().to_string(),
+                factor,
+            },
+            "按系数缩放数值",
+        )
+    }
+
+    pub fn shift_numeric(&mut self, column: &str, offset: f64) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ShiftNumeric {
+                column: column.trim().to_string(),
+                offset,
+            },
+            "对数值整体加减偏移量",
+        )
+    }
+
+    pub fn clamp_numeric(&mut self, column: &str, min: Option<f64>, max: Option<f64>) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ClampNumeric {
+                column: column.trim().to_string(),
+                min,
+                max,
+            },
+            "按上下界裁剪数值",
+        )
+    }
+
+    pub fn normalize_datetime_format(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::NormalizeDateTimeFormat {
+                column: column.trim().to_string(),
+            },
+            "统一时间字段格式",
+        )
+    }
+
+    pub fn convert_timestamp_to_datetime(&mut self, column: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::TimestampToDateTime {
+                column: column.trim().to_string(),
+            },
+            "将时间戳字段转换为标准日期时间",
+        )
+    }
+
+    pub fn shift_datetime_by_minutes(&mut self, column: &str, minutes: i64) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ShiftDateTimeByMinutes {
+                column: column.trim().to_string(),
+                minutes,
+            },
+            "按分钟整体偏移时间字段",
+        )
+    }
+
+    pub fn split_datetime_parts(&mut self, column: &str, prefix: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::SplitDateTimeParts {
+                column: column.trim().to_string(),
+                prefix: prefix.trim().to_string(),
+            },
+            "将时间字段拆分为年、月、日、时多个字段",
+        )
+    }
+
+    pub fn extract_date_to_column(&mut self, column: &str, target: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractDateToColumn {
+                column: column.trim().to_string(),
+                target: target.trim().to_string(),
+            },
+            "从时间字段提取日期列",
+        )
+    }
+
+    pub fn extract_year_to_column(&mut self, column: &str, target: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractYearToColumn {
+                column: column.trim().to_string(),
+                target: target.trim().to_string(),
+            },
+            "从时间字段提取年份列",
+        )
+    }
+
+    pub fn extract_month_to_column(&mut self, column: &str, target: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractMonthToColumn {
+                column: column.trim().to_string(),
+                target: target.trim().to_string(),
+            },
+            "从时间字段提取月份列",
+        )
+    }
+
+    pub fn extract_day_to_column(&mut self, column: &str, target: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractDayToColumn {
+                column: column.trim().to_string(),
+                target: target.trim().to_string(),
+            },
+            "从时间字段提取日列",
+        )
+    }
+
+    pub fn extract_hour_to_column(&mut self, column: &str, target: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::ExtractHourToColumn {
+                column: column.trim().to_string(),
+                target: target.trim().to_string(),
+            },
+            "从时间字段提取小时列",
+        )
+    }
+
+    pub fn filter_rows_by_time_window(&mut self, column: &str, start: &str, end: &str) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::FilterRowsByTimeWindow {
+                column: column.trim().to_string(),
+                start: start.trim().to_string(),
+                end: end.trim().to_string(),
+            },
+            "按时间窗口筛选记录",
+        )
+    }
+
+    pub fn sort_by_datetime(&mut self, column: &str, ascending: bool) -> Result<String> {
+        self.apply_operation(
+            PipelineOperation::SortByDateTime {
+                column: column.trim().to_string(),
+                ascending,
+            },
+            "按时间字段排序",
         )
     }
 

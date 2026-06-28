@@ -1,4 +1,7 @@
-use crate::model::{AggregateFunction, DatasetRecord, JoinKind, LogicalType, PreviewRow, TextCaseMode, page_window};
+use crate::model::{
+    AggregateFunction, DatasetRecord, JoinKind, LogicalType, PreviewRow, StatisticFillStrategy,
+    TextCaseMode, page_window,
+};
 use crate::service::AppService;
 use anyhow::Result;
 use rfd::FileDialog;
@@ -219,11 +222,19 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                 let form = ui.global::<FormState>();
                 let operation = form.get_row_operation().to_string();
                 let status = match operation.as_str() {
-                    "按关键词筛选" => service.filter_rows_contains(
+                    "按关键词保留" => service.filter_rows_contains(
+                        &form.get_filter_column().to_string(),
+                        &form.get_filter_keyword().to_string(),
+                    ),
+                    "按关键词删除" => service.drop_rows_not_contains(
                         &form.get_filter_column().to_string(),
                         &form.get_filter_keyword().to_string(),
                     ),
                     "保留行范围" => service.keep_row_range(
+                        parse_usize_or_default(&form.get_range_start().to_string(), 1),
+                        parse_usize_or_default(&form.get_range_end().to_string(), 1),
+                    ),
+                    "删除行范围" => service.drop_row_range(
                         parse_usize_or_default(&form.get_range_start().to_string(), 1),
                         parse_usize_or_default(&form.get_range_end().to_string(), 1),
                     ),
@@ -233,13 +244,68 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                     "抽样N行" => service.sample_rows(
                         parse_usize_or_default(&form.get_sample_row_count().to_string(), 50),
                     ),
+                    "保留缺失记录" => {
+                        service.keep_rows_with_missing(split_csv_like(&form.get_missing_columns().to_string()))
+                    }
                     "删除缺失记录" => {
                         service.drop_rows_with_missing(split_csv_like(&form.get_missing_columns().to_string()))
+                    }
+                    "按列去重" => {
+                        service.deduplicate_by_columns(split_csv_like(&form.get_row_key_columns().to_string()))
                     }
                     "整表去重" => service.deduplicate_rows(),
                     _ => service.drop_empty_rows(),
                 }
                 .unwrap_or_else(|error| format!("行处理失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_column_operation({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let operation = form.get_column_operation().to_string();
+                let status = match operation.as_str() {
+                    "重命名列" => service.rename_column(
+                        &form.get_rename_from().to_string(),
+                        &form.get_rename_to().to_string(),
+                    ),
+                    "保留列" => service.keep_columns(split_csv_like(&form.get_column_list().to_string())),
+                    "删除列" => service.drop_columns(split_csv_like(&form.get_column_list().to_string())),
+                    "删除空列" => service.drop_empty_columns(),
+                    "调整列顺序" => {
+                        service.reorder_columns(split_csv_like(&form.get_column_order_list().to_string()))
+                    }
+                    "列名前缀" => {
+                        service.add_column_name_affix(&form.get_column_name_prefix().to_string(), "")
+                    }
+                    "列名后缀" => {
+                        service.add_column_name_affix("", &form.get_column_name_suffix().to_string())
+                    }
+                    "复制列" => service.duplicate_column(
+                        &form.get_copy_source_column().to_string(),
+                        &form.get_copy_target_column().to_string(),
+                    ),
+                    "合并列" => service.merge_columns(
+                        split_csv_like(&form.get_merge_columns().to_string()),
+                        &form.get_merge_target_column().to_string(),
+                        &form.get_merge_separator().to_string(),
+                    ),
+                    "新增序号列" => service.add_row_number_column(
+                        &form.get_index_column_name().to_string(),
+                        parse_usize_or_default(&form.get_index_start().to_string(), 1),
+                    ),
+                    "按列排序" => service.sort_by(
+                        &form.get_sort_column().to_string(),
+                        form.get_sort_ascending(),
+                    ),
+                    _ => service.normalize_columns(),
+                }
+                .unwrap_or_else(|error| format!("列处理失败：{error:#}"));
                 refresh_ui(ui, service, &status);
             });
         }
@@ -262,7 +328,29 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         &form.get_replace_from().to_string(),
                         &form.get_replace_to().to_string(),
                     ),
-                    "列名标准化" => service.normalize_columns(),
+                    "压缩空白" => service.squeeze_text_whitespace(&form.get_text_column().to_string()),
+                    "移除指定字符" => service.remove_text_pattern(
+                        &form.get_text_column().to_string(),
+                        &form.get_text_remove_pattern().to_string(),
+                    ),
+                    "提取分隔符左侧" => service.extract_text_before(
+                        &form.get_text_column().to_string(),
+                        &form.get_text_delimiter().to_string(),
+                    ),
+                    "提取分隔符右侧" => service.extract_text_after(
+                        &form.get_text_column().to_string(),
+                        &form.get_text_delimiter().to_string(),
+                    ),
+                    "仅保留数字" => service.keep_digits_only(&form.get_text_column().to_string()),
+                    "添加前后缀" => service.add_text_affix(
+                        &form.get_text_column().to_string(),
+                        &form.get_text_prefix().to_string(),
+                        &form.get_text_suffix().to_string(),
+                    ),
+                    "文本截断" => service.truncate_text(
+                        &form.get_text_column().to_string(),
+                        parse_usize_or_default(&form.get_text_truncate_length().to_string(), 32),
+                    ),
                     _ => service.trim_text_values(),
                 }
                 .unwrap_or_else(|error| format!("文本处理失败：{error:#}"));
@@ -280,6 +368,22 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                 let operation = form.get_value_operation().to_string();
                 let status = match operation.as_str() {
                     "前值填充" => service.fill_null_forward(&form.get_fill_column().to_string()),
+                    "后值填充" => service.fill_null_backward(&form.get_fill_column().to_string()),
+                    "统计值填充" => service.fill_null_statistic(
+                        &form.get_stat_fill_column().to_string(),
+                        StatisticFillStrategy::from_text(&form.get_stat_fill_strategy().to_string()),
+                    ),
+                    "空字符串转空值" => service.empty_string_to_null(&form.get_fill_column().to_string()),
+                    "零值转空值" => service.zero_to_null(&form.get_fill_column().to_string()),
+                    "指定值替换" => service.replace_exact_value(
+                        &form.get_value_replace_column().to_string(),
+                        &form.get_value_replace_from().to_string(),
+                        &form.get_value_replace_to().to_string(),
+                    ),
+                    "字符串转数值" => service.convert_string_to_numeric(&form.get_cast_column().to_string()),
+                    "字符串转日期" => service.convert_string_to_datetime(&form.get_cast_column().to_string()),
+                    "整型转浮点" => service.convert_integer_to_float(&form.get_cast_column().to_string()),
+                    "布尔值转换" => service.convert_to_boolean(&form.get_bool_convert_column().to_string()),
                     "类型转换" => service.cast_column(
                         &form.get_cast_column().to_string(),
                         parse_logical_type(&form.get_cast_target().to_string()),
@@ -288,12 +392,85 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         &form.get_round_column().to_string(),
                         parse_usize_or_default(&form.get_round_digits().to_string(), 2),
                     ),
+                    "数值乘系数" => service.scale_numeric(
+                        &form.get_round_column().to_string(),
+                        parse_f64_or_default(&form.get_numeric_scale_factor().to_string(), 1.0),
+                    ),
+                    "数值加偏移" => service.shift_numeric(
+                        &form.get_round_column().to_string(),
+                        parse_f64_or_default(&form.get_numeric_offset().to_string(), 0.0),
+                    ),
+                    "数值裁剪" => service.clamp_numeric(
+                        &form.get_round_column().to_string(),
+                        parse_optional_f64(&form.get_numeric_clamp_min().to_string()),
+                        parse_optional_f64(&form.get_numeric_clamp_max().to_string()),
+                    ),
                     _ => service.fill_null_text(
                         &form.get_fill_column().to_string(),
                         &form.get_fill_value().to_string(),
                     ),
                 }
                 .unwrap_or_else(|error| format!("值处理失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_time_operation({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let operation = form.get_time_operation().to_string();
+                let status = match operation.as_str() {
+                    "时间戳转换" => {
+                        service.convert_timestamp_to_datetime(&form.get_time_target_column().to_string())
+                    }
+                    "日期拆分" => service.split_datetime_parts(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_prefix().to_string(),
+                    ),
+                    "年" => service.extract_year_to_column(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_column().to_string(),
+                    ),
+                    "月" => service.extract_month_to_column(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_column().to_string(),
+                    ),
+                    "日" => service.extract_day_to_column(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_column().to_string(),
+                    ),
+                    "时" => service.extract_hour_to_column(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_column().to_string(),
+                    ),
+                    "时间窗口筛选" => service.filter_rows_by_time_window(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_window_start().to_string(),
+                        &form.get_time_window_end().to_string(),
+                    ),
+                    "时间排序" => service.sort_by_datetime(
+                        &form.get_time_target_column().to_string(),
+                        form.get_time_sort_ascending(),
+                    ),
+                    "时间偏移(分钟)" => service.shift_datetime_by_minutes(
+                        &form.get_time_target_column().to_string(),
+                        parse_i64_or_default(&form.get_time_shift_minutes().to_string(), 60),
+                    ),
+                    "提取日期列" => service.extract_date_to_column(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_column().to_string(),
+                    ),
+                    "提取小时列" => service.extract_hour_to_column(
+                        &form.get_time_target_column().to_string(),
+                        &form.get_time_output_column().to_string(),
+                    ),
+                    _ => service.normalize_datetime_format(&form.get_time_target_column().to_string()),
+                }
+                .unwrap_or_else(|error| format!("时间处理失败：{error:#}"));
                 refresh_ui(ui, service, &status);
             });
         }
@@ -1007,6 +1184,23 @@ fn parse_usize_or_default(value: &str, default_value: usize) -> usize {
 
 fn parse_bounded_usize(value: &str, default_value: usize, min_value: usize, max_value: usize) -> usize {
     parse_usize_or_default(value, default_value).clamp(min_value, max_value)
+}
+
+fn parse_f64_or_default(value: &str, default_value: f64) -> f64 {
+    value.trim().parse::<f64>().unwrap_or(default_value)
+}
+
+fn parse_i64_or_default(value: &str, default_value: i64) -> i64 {
+    value.trim().parse::<i64>().unwrap_or(default_value)
+}
+
+fn parse_optional_f64(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        trimmed.parse::<f64>().ok()
+    }
 }
 
 fn split_csv_like(value: &str) -> Vec<String> {

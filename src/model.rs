@@ -446,6 +446,31 @@ impl AggregateFunction {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum StatisticFillStrategy {
+    Mean,
+    Median,
+    Mode,
+}
+
+impl StatisticFillStrategy {
+    pub fn from_text(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "median" | "中位数" => Self::Median,
+            "mode" | "众数" => Self::Mode,
+            _ => Self::Mean,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Mean => "均值",
+            Self::Median => "中位数",
+            Self::Mode => "众数",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PipelineOperation {
     Reinspect,
     NormalizeColumnNames,
@@ -466,7 +491,21 @@ pub enum PipelineOperation {
     SampleRows {
         count: usize,
     },
+    KeepRowsWithMissing {
+        columns: Vec<String>,
+    },
     DropRowsWithMissing {
+        columns: Vec<String>,
+    },
+    DropRowsNotContains {
+        column: String,
+        keyword: String,
+    },
+    DropRowRange {
+        start: usize,
+        end: usize,
+    },
+    DeduplicateByColumns {
         columns: Vec<String>,
     },
     RenameColumn {
@@ -479,6 +518,27 @@ pub enum PipelineOperation {
     DropColumns {
         columns: Vec<String>,
     },
+    DropEmptyColumns,
+    ReorderColumns {
+        columns: Vec<String>,
+    },
+    AddColumnNameAffix {
+        prefix: String,
+        suffix: String,
+    },
+    DuplicateColumn {
+        source: String,
+        target: String,
+    },
+    MergeColumns {
+        columns: Vec<String>,
+        target: String,
+        separator: String,
+    },
+    AddRowNumberColumn {
+        column: String,
+        start: usize,
+    },
     SortBy {
         column: String,
         ascending: bool,
@@ -488,6 +548,36 @@ pub enum PipelineOperation {
         value: String,
     },
     FillNullForward {
+        column: String,
+    },
+    FillNullBackward {
+        column: String,
+    },
+    FillNullStatistic {
+        column: String,
+        strategy: StatisticFillStrategy,
+    },
+    EmptyStringToNull {
+        column: String,
+    },
+    ZeroToNull {
+        column: String,
+    },
+    ReplaceExactValue {
+        column: String,
+        from: String,
+        to: String,
+    },
+    ConvertStringToNumeric {
+        column: String,
+    },
+    ConvertStringToDateTime {
+        column: String,
+    },
+    ConvertIntegerToFloat {
+        column: String,
+    },
+    ConvertToBoolean {
         column: String,
     },
     CastColumn {
@@ -503,9 +593,92 @@ pub enum PipelineOperation {
         from: String,
         to: String,
     },
+    SqueezeTextWhitespace {
+        column: String,
+    },
+    RemoveTextPattern {
+        column: String,
+        pattern: String,
+    },
+    ExtractTextBefore {
+        column: String,
+        delimiter: String,
+    },
+    ExtractTextAfter {
+        column: String,
+        delimiter: String,
+    },
+    KeepDigitsOnly {
+        column: String,
+    },
+    AddTextAffix {
+        column: String,
+        prefix: String,
+        suffix: String,
+    },
+    TruncateText {
+        column: String,
+        max_chars: usize,
+    },
     RoundNumeric {
         column: String,
         digits: usize,
+    },
+    ScaleNumeric {
+        column: String,
+        factor: f64,
+    },
+    ShiftNumeric {
+        column: String,
+        offset: f64,
+    },
+    ClampNumeric {
+        column: String,
+        min: Option<f64>,
+        max: Option<f64>,
+    },
+    NormalizeDateTimeFormat {
+        column: String,
+    },
+    TimestampToDateTime {
+        column: String,
+    },
+    ShiftDateTimeByMinutes {
+        column: String,
+        minutes: i64,
+    },
+    SplitDateTimeParts {
+        column: String,
+        prefix: String,
+    },
+    ExtractDateToColumn {
+        column: String,
+        target: String,
+    },
+    ExtractYearToColumn {
+        column: String,
+        target: String,
+    },
+    ExtractMonthToColumn {
+        column: String,
+        target: String,
+    },
+    ExtractDayToColumn {
+        column: String,
+        target: String,
+    },
+    ExtractHourToColumn {
+        column: String,
+        target: String,
+    },
+    FilterRowsByTimeWindow {
+        column: String,
+        start: String,
+        end: String,
+    },
+    SortByDateTime {
+        column: String,
+        ascending: bool,
     },
     GroupAggregate {
         group_columns: Vec<String>,
@@ -531,6 +704,13 @@ impl fmt::Display for PipelineOperation {
             Self::KeepRowRange { start, end } => write!(formatter, "保留行范围 {}-{}", start, end),
             Self::KeepTopRows { count } => write!(formatter, "保留前 {} 行", count),
             Self::SampleRows { count } => write!(formatter, "抽样 {} 行", count),
+            Self::KeepRowsWithMissing { columns } => {
+                if columns.is_empty() {
+                    write!(formatter, "保留含缺失值记录")
+                } else {
+                    write!(formatter, "保留缺失记录 {}", columns.join(", "))
+                }
+            }
             Self::DropRowsWithMissing { columns } => {
                 if columns.is_empty() {
                     write!(formatter, "删除含缺失值记录")
@@ -538,9 +718,30 @@ impl fmt::Display for PipelineOperation {
                     write!(formatter, "删除缺失记录 {}", columns.join(", "))
                 }
             }
+            Self::DropRowsNotContains { column, keyword } => {
+                write!(formatter, "删除 {} 不包含 {}", column, keyword)
+            }
+            Self::DropRowRange { start, end } => write!(formatter, "删除行范围 {}-{}", start, end),
+            Self::DeduplicateByColumns { columns } => {
+                write!(formatter, "按列去重 {}", columns.join(", "))
+            }
             Self::RenameColumn { from, to } => write!(formatter, "列重命名 {} -> {}", from, to),
             Self::KeepColumns { columns } => write!(formatter, "保留列 {}", columns.join(", ")),
             Self::DropColumns { columns } => write!(formatter, "删除列 {}", columns.join(", ")),
+            Self::DropEmptyColumns => write!(formatter, "删除空列"),
+            Self::ReorderColumns { columns } => write!(formatter, "调整列顺序 {}", columns.join(", ")),
+            Self::AddColumnNameAffix { prefix, suffix } => {
+                write!(formatter, "批量修改列名前后缀 {}..{}", prefix, suffix)
+            }
+            Self::DuplicateColumn { source, target } => {
+                write!(formatter, "复制列 {} -> {}", source, target)
+            }
+            Self::MergeColumns { columns, target, .. } => {
+                write!(formatter, "合并列 {} -> {}", columns.join(", "), target)
+            }
+            Self::AddRowNumberColumn { column, start } => {
+                write!(formatter, "新增序号列 {} 从 {}", column, start)
+            }
             Self::SortBy { column, ascending } => write!(
                 formatter,
                 "按列排序 {} {}",
@@ -551,6 +752,19 @@ impl fmt::Display for PipelineOperation {
                 write!(formatter, "默认值填充 {} = {}", column, value)
             }
             Self::FillNullForward { column } => write!(formatter, "前值填充 {}", column),
+            Self::FillNullBackward { column } => write!(formatter, "后值填充 {}", column),
+            Self::FillNullStatistic { column, strategy } => {
+                write!(formatter, "统计值填充 {} -> {}", column, strategy.as_str())
+            }
+            Self::EmptyStringToNull { column } => write!(formatter, "空字符串转空值 {}", column),
+            Self::ZeroToNull { column } => write!(formatter, "零值转空值 {}", column),
+            Self::ReplaceExactValue { column, from, to } => {
+                write!(formatter, "指定值替换 {}: {} -> {}", column, from, to)
+            }
+            Self::ConvertStringToNumeric { column } => write!(formatter, "字符串转数值 {}", column),
+            Self::ConvertStringToDateTime { column } => write!(formatter, "字符串转日期 {}", column),
+            Self::ConvertIntegerToFloat { column } => write!(formatter, "整型转浮点 {}", column),
+            Self::ConvertToBoolean { column } => write!(formatter, "布尔值转换 {}", column),
             Self::CastColumn { column, target } => {
                 write!(formatter, "类型转换 {} -> {}", column, target.as_str())
             }
@@ -560,9 +774,72 @@ impl fmt::Display for PipelineOperation {
             Self::ReplaceText { column, from, to } => {
                 write!(formatter, "文本替换 {}: {} -> {}", column, from, to)
             }
+            Self::SqueezeTextWhitespace { column } => write!(formatter, "压缩空白 {}", column),
+            Self::RemoveTextPattern { column, pattern } => {
+                write!(formatter, "移除字符 {}: {}", column, pattern)
+            }
+            Self::ExtractTextBefore { column, delimiter } => {
+                write!(formatter, "提取分隔符左侧 {} @ {}", column, delimiter)
+            }
+            Self::ExtractTextAfter { column, delimiter } => {
+                write!(formatter, "提取分隔符右侧 {} @ {}", column, delimiter)
+            }
+            Self::KeepDigitsOnly { column } => write!(formatter, "仅保留数字 {}", column),
+            Self::AddTextAffix { column, prefix, suffix } => {
+                write!(formatter, "添加前后缀 {}: {}..{}", column, prefix, suffix)
+            }
+            Self::TruncateText { column, max_chars } => {
+                write!(formatter, "文本截断 {} -> {} 字符", column, max_chars)
+            }
             Self::RoundNumeric { column, digits } => {
                 write!(formatter, "数值保留小数 {} -> {} 位", column, digits)
             }
+            Self::ScaleNumeric { column, factor } => {
+                write!(formatter, "数值缩放 {} × {}", column, factor)
+            }
+            Self::ShiftNumeric { column, offset } => {
+                write!(formatter, "数值偏移 {} + {}", column, offset)
+            }
+            Self::ClampNumeric { column, min, max } => match (min, max) {
+                (Some(min), Some(max)) => write!(formatter, "数值裁剪 {} [{} , {}]", column, min, max),
+                (Some(min), None) => write!(formatter, "数值裁剪 {} >= {}", column, min),
+                (None, Some(max)) => write!(formatter, "数值裁剪 {} <= {}", column, max),
+                (None, None) => write!(formatter, "数值裁剪 {}", column),
+            },
+            Self::NormalizeDateTimeFormat { column } => {
+                write!(formatter, "时间格式标准化 {}", column)
+            }
+            Self::TimestampToDateTime { column } => write!(formatter, "时间戳转换 {}", column),
+            Self::ShiftDateTimeByMinutes { column, minutes } => {
+                write!(formatter, "时间偏移 {} {} 分钟", column, minutes)
+            }
+            Self::SplitDateTimeParts { column, prefix } => {
+                write!(formatter, "日期拆分 {} -> {}", column, prefix)
+            }
+            Self::ExtractDateToColumn { column, target } => {
+                write!(formatter, "提取日期 {} -> {}", column, target)
+            }
+            Self::ExtractYearToColumn { column, target } => {
+                write!(formatter, "提取年 {} -> {}", column, target)
+            }
+            Self::ExtractMonthToColumn { column, target } => {
+                write!(formatter, "提取月 {} -> {}", column, target)
+            }
+            Self::ExtractDayToColumn { column, target } => {
+                write!(formatter, "提取日 {} -> {}", column, target)
+            }
+            Self::ExtractHourToColumn { column, target } => {
+                write!(formatter, "提取小时 {} -> {}", column, target)
+            }
+            Self::FilterRowsByTimeWindow { column, start, end } => {
+                write!(formatter, "时间窗口筛选 {} [{} , {}]", column, start, end)
+            }
+            Self::SortByDateTime { column, ascending } => write!(
+                formatter,
+                "时间排序 {} {}",
+                column,
+                if *ascending { "升序" } else { "降序" }
+            ),
             Self::GroupAggregate {
                 group_columns,
                 target_column,
