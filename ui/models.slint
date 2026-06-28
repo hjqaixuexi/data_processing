@@ -27,27 +27,9 @@ export struct ColumnRowData {
     role-hint: string,
 }
 
-export struct PreviewHeaderData {
-    col1: string,
-    col2: string,
-    col3: string,
-    col4: string,
-    col5: string,
-    col6: string,
-    col7: string,
-    col8: string,
-}
-
 export struct PreviewRowData {
     row-label: string,
-    col1: string,
-    col2: string,
-    col3: string,
-    col4: string,
-    col5: string,
-    col6: string,
-    col7: string,
-    col8: string,
+    cells: [string],
 }
 
 export struct IssueRowData {
@@ -83,7 +65,7 @@ export global AppState {
     in property <[DatasetCardData]> datasets;
     in property <[MetricCardData]> metrics;
     in property <[ColumnRowData]> columns;
-    in property <PreviewHeaderData> preview-header;
+    in property <[string]> preview-columns;
     in property <[PreviewRowData]> preview-rows;
     in property <[IssueRowData]> issues;
     in property <[StepRowData]> steps;
@@ -99,6 +81,7 @@ export global AppState {
     in property <string> preview-range-label;
     in property <string> field-page-label;
     in property <string> field-range-label;
+    in property <int> field-page-size;
     in property <int> selected-dataset-id;
     in property <bool> can-undo;
     in property <bool> can-redo;

@@ -94,15 +94,15 @@ impl DataTable {
         let titles = self
             .columns
             .iter()
-            .take(limit.min(8))
+            .take(limit.min(self.columns.len()))
             .map(|column| compact_preview_text(Some(&column.name), 18))
             .collect::<Vec<_>>();
 
-        PreviewHeader::from_cells(titles)
+        PreviewHeader { cells: titles }
     }
 
     pub fn preview_rows(&self, row_limit: usize, col_limit: usize) -> Vec<PreviewRow> {
-        let visible_cols = col_limit.min(8);
+        let visible_cols = col_limit.min(self.columns.len());
         (0..self.height().min(row_limit))
             .map(|row_index| {
                 let cells = self
@@ -112,10 +112,7 @@ impl DataTable {
                     .map(|value| compact_preview_text(value.as_ref(), 28))
                     .collect::<Vec<_>>();
 
-                PreviewRow {
-                    row_label: (row_index + 1).to_string(),
-                    ..PreviewRow::from_cells(cells)
-                }
+                PreviewRow { row_label: (row_index + 1).to_string(), cells }
             })
             .collect()
     }
@@ -150,7 +147,7 @@ impl DataTable {
     }
 
     fn preview_rows_by_indexes(&self, indexes: &[usize], col_limit: usize) -> Vec<PreviewRow> {
-        let visible_cols = col_limit.min(8);
+        let visible_cols = col_limit.min(self.columns.len());
         indexes
             .iter()
             .filter(|row_index| **row_index < self.height())
@@ -162,10 +159,7 @@ impl DataTable {
                     .map(|value| compact_preview_text(value.as_ref(), 32))
                     .collect::<Vec<_>>();
 
-                PreviewRow {
-                    row_label: (row_index + 1).to_string(),
-                    ..PreviewRow::from_cells(cells)
-                }
+                PreviewRow { row_label: (row_index + 1).to_string(), cells }
             })
             .collect()
     }
@@ -214,58 +208,13 @@ impl DataTable {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct PreviewHeader {
-    pub col1: String,
-    pub col2: String,
-    pub col3: String,
-    pub col4: String,
-    pub col5: String,
-    pub col6: String,
-    pub col7: String,
-    pub col8: String,
-}
-
-impl PreviewHeader {
-    pub fn from_cells(cells: Vec<String>) -> Self {
-        Self {
-            col1: cell_at(&cells, 0),
-            col2: cell_at(&cells, 1),
-            col3: cell_at(&cells, 2),
-            col4: cell_at(&cells, 3),
-            col5: cell_at(&cells, 4),
-            col6: cell_at(&cells, 5),
-            col7: cell_at(&cells, 6),
-            col8: cell_at(&cells, 7),
-        }
-    }
+    pub cells: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct PreviewRow {
     pub row_label: String,
-    pub col1: String,
-    pub col2: String,
-    pub col3: String,
-    pub col4: String,
-    pub col5: String,
-    pub col6: String,
-    pub col7: String,
-    pub col8: String,
-}
-
-impl PreviewRow {
-    pub fn from_cells(cells: Vec<String>) -> Self {
-        Self {
-            row_label: String::new(),
-            col1: cell_at(&cells, 0),
-            col2: cell_at(&cells, 1),
-            col3: cell_at(&cells, 2),
-            col4: cell_at(&cells, 3),
-            col5: cell_at(&cells, 4),
-            col6: cell_at(&cells, 5),
-            col7: cell_at(&cells, 6),
-            col8: cell_at(&cells, 7),
-        }
-    }
+    pub cells: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -827,9 +776,6 @@ pub fn pseudo_random_row_indexes(total_rows: usize, page: usize, page_size: usiz
         .collect()
 }
 
-fn cell_at(cells: &[String], index: usize) -> String {
-    cells.get(index).cloned().unwrap_or_default()
-}
 
 fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
     while right != 0 {

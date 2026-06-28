@@ -1,7 +1,4 @@
-use crate::model::{
-    AggregateFunction, DatasetRecord, JoinKind, LogicalType, PreviewHeader, PreviewRow,
-    TextCaseMode, page_window,
-};
+use crate::model::{AggregateFunction, DatasetRecord, JoinKind, LogicalType, PreviewRow, TextCaseMode, page_window};
 use crate::service::AppService;
 use anyhow::Result;
 use rfd::FileDialog;
@@ -723,7 +720,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             form.set_quality_time_column(record.quality_rules.time_column.clone().into());
         }
 
-        let preview_size = parse_bounded_usize(&form.get_preview_row_count().to_string(), 20, 5, 200);
+        let preview_size = parse_bounded_usize(&form.get_preview_row_count().to_string(), 20, 1, 200);
         let field_size = parse_bounded_usize(&form.get_field_row_count().to_string(), 12, 5, 50);
         let preview_page = form.get_preview_page().max(1) as usize;
         let field_page = form.get_field_page().max(1) as usize;
@@ -780,11 +777,14 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             )
             .into(),
         );
-        state.set_preview_header(map_preview_header(&record.working_table.preview_header(8)));
+        state.set_preview_columns(ModelRc::new(VecModel::from(map_preview_columns(
+            &record.working_table.preview_header(record.working_table.width()),
+        ))));
         state.set_preview_page_label(preview.page_label.into());
         state.set_preview_range_label(preview.range_label.into());
         state.set_field_page_label(fields.page_label.into());
         state.set_field_range_label(fields.range_label.into());
+        state.set_field_page_size(field_size as i32);
         state.set_can_preview_prev(preview.can_prev);
         state.set_can_preview_next(preview.can_next);
         state.set_can_field_prev(fields.can_prev);
@@ -855,11 +855,12 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         form.set_quality_time_column(SharedString::new());
         state.set_quality_rule_summary("主键 [未识别] | 时间列 [未识别]".into());
         state.set_active_count_label("等待导入".into());
-        state.set_preview_header(empty_preview_header());
+        state.set_preview_columns(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
         state.set_preview_page_label("第 0 / 0 页".into());
         state.set_preview_range_label("暂无记录".into());
         state.set_field_page_label("第 0 / 0 页".into());
         state.set_field_range_label("暂无字段".into());
+        state.set_field_page_size(0);
         state.set_can_preview_prev(false);
         state.set_can_preview_next(false);
         state.set_can_field_prev(false);
@@ -913,43 +914,20 @@ fn build_metrics(record: &DatasetRecord) -> Vec<MetricCardData> {
     ]
 }
 
-fn map_preview_header(header: &PreviewHeader) -> PreviewHeaderData {
-    PreviewHeaderData {
-        col1: header.col1.clone().into(),
-        col2: header.col2.clone().into(),
-        col3: header.col3.clone().into(),
-        col4: header.col4.clone().into(),
-        col5: header.col5.clone().into(),
-        col6: header.col6.clone().into(),
-        col7: header.col7.clone().into(),
-        col8: header.col8.clone().into(),
-    }
-}
-
-fn empty_preview_header() -> PreviewHeaderData {
-    PreviewHeaderData {
-        col1: SharedString::new(),
-        col2: SharedString::new(),
-        col3: SharedString::new(),
-        col4: SharedString::new(),
-        col5: SharedString::new(),
-        col6: SharedString::new(),
-        col7: SharedString::new(),
-        col8: SharedString::new(),
-    }
+fn map_preview_columns(header: &crate::model::PreviewHeader) -> Vec<SharedString> {
+    header.cells.iter().cloned().map(SharedString::from).collect()
 }
 
 fn map_preview_row(row: &PreviewRow) -> PreviewRowData {
     PreviewRowData {
         row_label: row.row_label.clone().into(),
-        col1: row.col1.clone().into(),
-        col2: row.col2.clone().into(),
-        col3: row.col3.clone().into(),
-        col4: row.col4.clone().into(),
-        col5: row.col5.clone().into(),
-        col6: row.col6.clone().into(),
-        col7: row.col7.clone().into(),
-        col8: row.col8.clone().into(),
+        cells: ModelRc::new(VecModel::from(
+            row.cells
+                .iter()
+                .cloned()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        )),
     }
 }
 
@@ -1044,9 +1022,13 @@ fn build_preview_model(
     };
     let page = requested_page.clamp(1, actual_total_pages.max(1));
     let preview_rows = if preview_mode == "随机抽样" {
-        record.working_table.preview_sample_rows(page, page_size, 8)
+        record
+            .working_table
+            .preview_sample_rows(page, page_size, record.working_table.width())
     } else {
-        record.working_table.preview_rows_window(page, page_size, 8)
+        record
+            .working_table
+            .preview_rows_window(page, page_size, record.working_table.width())
     };
 
     PreviewModel {

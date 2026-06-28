@@ -14,7 +14,6 @@ import {
     Logic,
     MappingRowData,
     MetricCardData,
-    PreviewHeaderData,
     PreviewRowData,
     StepRowData,
 } from "models.slint";
@@ -39,7 +38,6 @@ export {
     Logic,
     MappingRowData,
     MetricCardData,
-    PreviewHeaderData,
     PreviewRowData,
     StepRowData,
 }from "models.slint";
@@ -315,7 +313,9 @@ export component MainWindow inherits Window {
     private property <length> page-padding: 0px;
     private property <length> sidebar-width: 316px;
     private property <length> preview-col-width: root.width > 1600px ? 154px : 136px;
-    private property <length> preview-table-width: 54px + 8 * root.preview-col-width;
+    private property <length> preview-scroll-gutter: root.preview-col-width;
+    private property <length> preview-table-width: 54px + AppState.preview-columns.length * root.preview-col-width;
+    private property <length> table-scrollbar-gutter: 12px;
     private property <length> issue-table-width: 960px;
     private property <length> field-table-width: 812px;
 
@@ -545,12 +545,18 @@ export component MainWindow inherits Window {
                                 background: transparent;
                                 clip: true;
 
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    vertical-stretch: 1;
-                                    min-width: 0px;
-                                    min-height: 0px;
-                                    spacing: 8px;
+                                preview-page-scroll := ScrollView {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                    viewport-width: self.visible-width;
+                                    viewport-height: preview-page-content.preferred-height;
+
+                                    preview-page-content := VerticalBox {
+                                        width: preview-page-scroll.visible-width;
+                                        spacing: 8px;
 
                                     Panel {
                                         title: "样表预览";
@@ -635,7 +641,7 @@ export component MainWindow inherits Window {
                                                     y: 0px;
                                                     width: parent.width;
                                                     height: parent.height;
-                                                    viewport-width: max(self.visible-width, preview-content.preferred-width);
+                                                    viewport-width: max(self.visible-width, preview-content.preferred-width + root.preview-scroll-gutter);
                                                     viewport-height: max(self.visible-height, preview-content.preferred-height);
                                                     preview-table := Rectangle {
                                                         width: preview-scroll.viewport-width;
@@ -643,7 +649,7 @@ export component MainWindow inherits Window {
                                                         background: AppTheme.panel-bg;
 
                                                         preview-content := VerticalBox {
-                                                            width: parent.width;
+                                                            width: root.preview-table-width;
                                                             spacing: 0px;
 
                                                             HorizontalBox {
@@ -654,44 +660,9 @@ export component MainWindow inherits Window {
                                                                     center: true;
                                                                 }
 
-                                                                LedgerHeaderCell {
+                                                                for header in AppState.preview-columns: LedgerHeaderCell {
                                                                     cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col1;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col2;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col3;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col4;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col5;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col6;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col7;
-                                                                }
-
-                                                                LedgerHeaderCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    label: AppState.preview-header.col8;
+                                                                    label: header;
                                                                 }
                                                             }
 
@@ -704,51 +675,9 @@ export component MainWindow inherits Window {
                                                                     center: true;
                                                                 }
 
-                                                                LedgerCell {
+                                                                for cell in row.cells: LedgerCell {
                                                                     cell-width: root.preview-col-width;
-                                                                    value: row.col1;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col2;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col3;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col4;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col5;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col6;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col7;
-                                                                    alternate: Math.mod(index, 2) == 1;
-                                                                }
-
-                                                                LedgerCell {
-                                                                    cell-width: root.preview-col-width;
-                                                                    value: row.col8;
+                                                                    value: cell;
                                                                     alternate: Math.mod(index, 2) == 1;
                                                                 }
                                                             }
@@ -763,7 +692,7 @@ export component MainWindow inherits Window {
                                         title: "字段台账";
                                         subtitle: "";
                                         horizontal-stretch: 1;
-                                        vertical-stretch: 2;
+                                        vertical-stretch: 3;
 
                                         VerticalBox {
                                             spacing: 6px;
@@ -822,7 +751,7 @@ export component MainWindow inherits Window {
                                             }
 
                                             Rectangle {
-                                                min-height: 240px;
+                                                min-height: max(240px, 28px + AppState.field-page-size * 28px + root.table-scrollbar-gutter);
                                                 vertical-stretch: 1;
                                                 background: AppTheme.panel-bg;
                                                 border-width: 1px;
@@ -935,12 +864,18 @@ export component MainWindow inherits Window {
                                                                     alternate: Math.mod(index, 2) == 1;
                                                                 }
                                                             }
+
+                                                            Rectangle {
+                                                                height: root.table-scrollbar-gutter;
+                                                                background: transparent;
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
                                         }
                                     }
+                                }
                                 }
                             }
 
