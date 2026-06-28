@@ -3,6 +3,11 @@ name = "data_processing"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+opt-level = 3 # 优化等级，0-3，s，z
+lto = true # 启用链接时优化
+codegen-units = 8 # 减少代码生成单元以提高优化效果
+
 [dependencies]
 slint = "1.17.0"
 anyhow = "1.0.100"

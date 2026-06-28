@@ -321,8 +321,8 @@ export component MainWindow inherits Window {
     private property <length> pipeline-bottom-padding: 48px;
 
     title: "工程数据处理台";
-    preferred-width: 1500px;
-    preferred-height: 940px;
+    preferred-width: 1300px;
+    preferred-height: 800px;
     min-width: 1500px;
     min-height: 940px;
     background: AppTheme.window-bg;
@@ -2400,7 +2400,7 @@ export component MainWindow inherits Window {
                                             spacing: root.join-panel-gap;
 
                                             Panel {
-                                                title: "7.1 关联方式";
+                                                title: "关联方式";
                                                 subtitle: FormState.join-kind == "内连接"
                                                     ? "仅保留左右表都能匹配到的记录，适合强调精确命中的融合。"
                                                     : FormState.join-kind == "外连接"
@@ -2433,7 +2433,7 @@ export component MainWindow inherits Window {
                                             }
 
                                             Panel {
-                                                title: "7.2 融合场景";
+                                                title: "融合场景";
                                                 subtitle: "根据场景模板快速确定常见的匹配键思路。";
                                                 horizontal-stretch: 1;
 
@@ -2468,7 +2468,7 @@ export component MainWindow inherits Window {
                                             }
 
                                             Panel {
-                                                title: "7.3 融合过程控制";
+                                                title: "融合过程控制";
                                                 subtitle: "先确认主表和目标表，再填写两侧匹配字段与冲突字段处理方式。";
                                                 horizontal-stretch: 1;
 
@@ -2576,7 +2576,7 @@ export component MainWindow inherits Window {
                                             }
 
                                             Panel {
-                                                title: "7.4 融合结果检查";
+                                                title: "融合结果检查";
                                                 subtitle: "执行融合后在这里查看匹配结果与风险提示。";
                                                 horizontal-stretch: 1;
 
