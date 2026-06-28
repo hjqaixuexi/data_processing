@@ -314,13 +314,14 @@ export component MainWindow inherits Window {
     private property <length> cleaning-content-height: 148px + 168px + 148px + 178px + 172px + 4 * root.cleaning-panel-gap + root.cleaning-bottom-padding;
     private property <length> derive-panel-gap: 8px;
     private property <length> derive-bottom-padding: 260px;
-    private property <length> derive-content-height: 256px + 148px + 188px + 300px + 3 * root.derive-panel-gap + root.derive-bottom-padding;
+    private property <length> derive-content-height: 256px + 148px + 236px + 300px + 3 * root.derive-panel-gap + root.derive-bottom-padding;
     private property <length> join-panel-gap: 8px;
     private property <length> join-bottom-padding: 48px;
     private property <length> pipeline-panel-gap: 8px;
     private property <length> pipeline-bottom-padding: 48px;
 
     title: "工程数据处理台";
+    icon: @image-url("assets/data_processing.png");
     preferred-width: 1300px;
     preferred-height: 800px;
     min-width: 1500px;
@@ -2153,7 +2154,7 @@ export component MainWindow inherits Window {
                                                 title: "排序与排名";
                                                 subtitle: "";
                                                 horizontal-stretch: 1;
-                                                height: 188px;
+                                                height: 265px;
 
                                                 VerticalBox {
                                                     spacing: 6px;
@@ -2405,7 +2406,7 @@ export component MainWindow inherits Window {
                                                     ? "仅保留左右表都能匹配到的记录，适合强调精确命中的融合。"
                                                     : FormState.join-kind == "外连接"
                                                     ? "保留左右表全部记录，未匹配字段会出现空值，适合先全面对齐再回查。"
-                                                    : "以当前选中数据集为主表保留全部主表记录，适合工程台账式融合。";
+                                                    : "";
                                                 horizontal-stretch: 1;
 
                                                 HorizontalBox {
@@ -2434,7 +2435,7 @@ export component MainWindow inherits Window {
 
                                             Panel {
                                                 title: "融合场景";
-                                                subtitle: "根据场景模板快速确定常见的匹配键思路。";
+                                                subtitle: "";
                                                 horizontal-stretch: 1;
 
                                                 VerticalBox {
@@ -2462,7 +2463,7 @@ export component MainWindow inherits Window {
                                                             ? "优先统一工况编号、时刻点或试验编号后再做融合。"
                                                             : FormState.join-scene == "配置参数 + 输出结果"
                                                             ? "优先使用配置编号、版本号或参数组编码。"
-                                                            : "优先使用采样编号、样品编号或记录批次。";
+                                                            : "";
                                                     }
                                                 }
                                             }
@@ -2569,7 +2570,7 @@ export component MainWindow inherits Window {
                                                             horizontal-stretch: 1;
                                                             card-min-height: 54px;
                                                             title: "可选目标 / 结果预览";
-                                                            value: AppState.join-target-hint + " | 执行后会生成新的融合结果数据集并自动切换。";
+                                                            value: AppState.join-target-hint + "执行后会生成新的融合结果数据集并自动切换。";
                                                         }
                                                     }
                                                 }
