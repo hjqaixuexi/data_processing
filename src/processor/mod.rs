@@ -1,7 +1,7 @@
 use crate::model::{
-    AdjacentCompareMode, AggregateFunction, CompareOperator, DataTable, JoinKind, LogicalType,
-    PipelineOperation, PriorityPlacement, StatisticFillStrategy, TableColumn, TextCaseMode,
-    TimeDiffUnit, infer_logical_type, normalize_headers, row_signature,
+    AdjacentCompareMode, AggregateFunction, CompareOperator, DataTable, JoinConflictStrategy,
+    JoinKind, LogicalType, PipelineOperation, PriorityPlacement, StatisticFillStrategy,
+    TableColumn, TextCaseMode, TimeDiffUnit, infer_logical_type, normalize_headers, row_signature,
 };
 use anyhow::{Result, bail};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, Timelike, Utc};
@@ -234,13 +234,22 @@ pub fn apply_operation(table: &DataTable, operation: &PipelineOperation) -> Resu
     }
 }
 
+pub struct JoinExecution {
+    pub table: DataTable,
+    pub matched_rows: usize,
+    pub unmatched_left: usize,
+    pub unmatched_right: usize,
+    pub conflict_fields: Vec<String>,
+}
+
 pub fn join_tables(
     left: &DataTable,
     right: &DataTable,
     left_keys: &[String],
     right_keys: &[String],
     join_kind: JoinKind,
-) -> Result<DataTable> {
+    conflict_strategy: JoinConflictStrategy,
+) -> Result<JoinExecution> {
     if left_keys.is_empty() || right_keys.is_empty() || left_keys.len() != right_keys.len() {
         bail!("融合时需要成对指定左右主键");
     }
@@ -267,6 +276,7 @@ pub fn join_tables(
         .collect::<Vec<_>>();
     let right_key_names = right_keys.iter().collect::<BTreeSet<_>>();
 
+    let mut conflict_fields = Vec::new();
     let right_extra_indexes = right
         .columns
         .iter()
@@ -275,9 +285,24 @@ pub fn join_tables(
             if right_key_names.contains(&column.name) {
                 None
             } else {
-                let mut output_name = column.name.clone();
-                if output_headers.contains(&output_name) {
-                    output_name.push_str("_right");
+                let has_conflict = output_headers.contains(&column.name);
+                if has_conflict {
+                    conflict_fields.push(column.name.clone());
+                }
+                if has_conflict && matches!(conflict_strategy, JoinConflictStrategy::KeepLeftOnly) {
+                    return None;
+                }
+                let mut output_name = match conflict_strategy {
+                    JoinConflictStrategy::AppendRightSuffix if has_conflict => {
+                        format!("{}_right", column.name)
+                    }
+                    JoinConflictStrategy::PrefixRightMarker if has_conflict => {
+                        format!("right_{}", column.name)
+                    }
+                    _ => column.name.clone(),
+                };
+                while output_headers.contains(&output_name) {
+                    output_name.push_str("_r");
                 }
                 output_headers.push(output_name);
                 output_types.push(column.logical_type.clone());
@@ -288,6 +313,8 @@ pub fn join_tables(
 
     let mut merged_rows = Vec::new();
     let mut matched_right = BTreeSet::new();
+    let mut matched_rows = 0usize;
+    let mut unmatched_left = 0usize;
 
     for left_row in &left_rows {
         let key = compose_key(left_row, &left_key_indexes);
@@ -299,11 +326,15 @@ pub fn join_tables(
                     row.push(right_rows[*right_index][*extra_index].clone());
                 }
                 merged_rows.push(row);
+                matched_rows += 1;
             }
         } else if matches!(join_kind, JoinKind::Left | JoinKind::Outer) {
             let mut row = left_row.clone();
             row.extend((0..right_extra_indexes.len()).map(|_| None));
             merged_rows.push(row);
+            unmatched_left += 1;
+        } else {
+            unmatched_left += 1;
         }
     }
 
@@ -321,7 +352,13 @@ pub fn join_tables(
         }
     }
 
-    Ok(build_table_from_rows(output_headers, output_types, merged_rows))
+    Ok(JoinExecution {
+        table: build_table_from_rows(output_headers, output_types, merged_rows),
+        matched_rows,
+        unmatched_left,
+        unmatched_right: right_rows.len().saturating_sub(matched_right.len()),
+        conflict_fields,
+    })
 }
 
 fn normalize_column_names(table: &DataTable) -> DataTable {

@@ -3,9 +3,9 @@ use crate::inspector;
 use crate::loader;
 use crate::model::{
     AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetHistory, DatasetRecord,
-    DatasetSnapshot, FileFormat, JoinKind, LoadedDataset, LogicalType, PipelineOperation,
-    PipelineStep, PriorityPlacement, QualityRules, StatisticFillStrategy, TextCaseMode,
-    TimeDiffUnit, format_bytes, format_duration_millis,
+    DatasetSnapshot, FileFormat, JoinConflictStrategy, JoinKind, LoadedDataset, LogicalType,
+    PipelineOperation, PipelineStep, PriorityPlacement, QualityRules, StatisticFillStrategy,
+    TextCaseMode, TimeDiffUnit, format_bytes, format_duration_millis,
 };
 use crate::pipeline;
 use crate::processor;
@@ -17,6 +17,17 @@ pub struct AppService {
     next_dataset_id: i32,
     datasets: Vec<DatasetRecord>,
     pub selected_dataset_id: Option<i32>,
+    last_join_report: Option<JoinReport>,
+}
+
+#[derive(Clone, Debug)]
+pub struct JoinReport {
+    pub matched_rows: usize,
+    pub unmatched_left: usize,
+    pub unmatched_right: usize,
+    pub conflict_fields: Vec<String>,
+    pub conflict_strategy: String,
+    pub data_loss_hint: String,
 }
 
 impl AppService {
@@ -25,6 +36,7 @@ impl AppService {
             next_dataset_id: 1,
             datasets: Vec::new(),
             selected_dataset_id: None,
+            last_join_report: None,
         }
     }
 
@@ -75,6 +87,25 @@ impl AppService {
     pub fn selected_dataset(&self) -> Option<&DatasetRecord> {
         let id = self.selected_dataset_id?;
         self.datasets.iter().find(|record| record.id == id)
+    }
+
+    pub fn join_target_hint(&self) -> String {
+        let selected_id = self.selected_dataset_id;
+        let options = self
+            .datasets
+            .iter()
+            .filter(|record| Some(record.id) != selected_id)
+            .map(|record| format!("{}={}", record.id, record.dataset_name))
+            .collect::<Vec<_>>();
+        if options.is_empty() {
+            "当前没有可融合的目标数据集".to_string()
+        } else {
+            format!("可选目标数据集：{}", options.join(" | "))
+        }
+    }
+
+    pub fn last_join_report(&self) -> Option<&JoinReport> {
+        self.last_join_report.as_ref()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -1004,6 +1035,7 @@ impl AppService {
         left_keys: Vec<String>,
         right_keys: Vec<String>,
         join_kind: JoinKind,
+        conflict_strategy: JoinConflictStrategy,
     ) -> Result<String> {
         let left_id = self.selected_dataset_id.context("当前没有选中数据集")?;
         if left_id == right_dataset_id {
@@ -1023,13 +1055,21 @@ impl AppService {
             .cloned()
             .context("右表不存在")?;
 
-        let joined = processor::join_tables(
+        let join_result = processor::join_tables(
             &left.working_table,
             &right.working_table,
             &left_keys,
             &right_keys,
             join_kind.clone(),
+            conflict_strategy.clone(),
         )?;
+        let processor::JoinExecution {
+            table: joined,
+            matched_rows,
+            unmatched_left,
+            unmatched_right,
+            conflict_fields,
+        } = join_result;
 
         let frame = joined.to_frame()?;
         let quality_rules = QualityRules::default();
@@ -1066,6 +1106,41 @@ impl AppService {
             }],
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+        });
+
+        let data_loss_hint = match join_kind {
+            JoinKind::Left => {
+                if unmatched_right > 0 {
+                    format!("左连接未保留右表未匹配记录 {} 条", unmatched_right)
+                } else {
+                    "左连接未发现右表未匹配记录".to_string()
+                }
+            }
+            JoinKind::Inner => {
+                if unmatched_left > 0 || unmatched_right > 0 {
+                    format!(
+                        "内连接丢弃了未匹配记录：左表 {} 条，右表 {} 条",
+                        unmatched_left, unmatched_right
+                    )
+                } else {
+                    "内连接全部记录均成功匹配".to_string()
+                }
+            }
+            JoinKind::Outer => {
+                if unmatched_left > 0 || unmatched_right > 0 {
+                    "外连接已保留未匹配记录，结果中可能出现空值列".to_string()
+                } else {
+                    "外连接未发现未匹配记录".to_string()
+                }
+            }
+        };
+        self.last_join_report = Some(JoinReport {
+            matched_rows,
+            unmatched_left,
+            unmatched_right,
+            conflict_fields,
+            conflict_strategy: conflict_strategy.as_str().to_string(),
+            data_loss_hint,
         });
 
         self.selected_dataset_id = Some(dataset_id);

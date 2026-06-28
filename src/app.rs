@@ -1,6 +1,7 @@
 use crate::model::{
-    AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetRecord, JoinKind, LogicalType,
-    PreviewRow, PriorityPlacement, StatisticFillStrategy, TextCaseMode, TimeDiffUnit, page_window,
+    AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetRecord, JoinConflictStrategy,
+    JoinKind, LogicalType, PreviewRow, PriorityPlacement, StatisticFillStrategy, TextCaseMode,
+    TimeDiffUnit, page_window,
 };
 use crate::service::AppService;
 use anyhow::Result;
@@ -907,6 +908,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         split_csv_like(&form.get_join_left_key().to_string()),
                         split_csv_like(&form.get_join_right_key().to_string()),
                         JoinKind::from_text(&form.get_join_kind().to_string()),
+                        JoinConflictStrategy::from_text(
+                            &form.get_join_conflict_mode().to_string(),
+                        ),
                     )
                     .unwrap_or_else(|error| format!("融合失败：{error:#}"));
                 refresh_ui(ui, service, &status);
@@ -1173,6 +1177,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_can_field_next(fields.can_next);
         state.set_can_undo(service.can_undo());
         state.set_can_redo(service.can_redo());
+        state.set_join_target_hint(service.join_target_hint().into());
 
         state.set_metrics(ModelRc::new(VecModel::from(build_metrics(record))));
         state.set_columns(ModelRc::new(VecModel::from(fields.rows)));
@@ -1228,6 +1233,34 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
                 })
                 .collect::<Vec<_>>(),
         )));
+        if let Some(report) = service.last_join_report() {
+            state.set_join_match_summary(format!("成功匹配 {} 条", report.matched_rows).into());
+            state.set_join_unmatched_summary(
+                format!(
+                    "左表未匹配 {} 条，右表未匹配 {} 条",
+                    report.unmatched_left, report.unmatched_right
+                )
+                .into(),
+            );
+            state.set_join_conflict_summary(
+                if report.conflict_fields.is_empty() {
+                    format!("无冲突字段 | 策略：{}", report.conflict_strategy)
+                } else {
+                    format!(
+                        "{} | 策略：{}",
+                        report.conflict_fields.join(", "),
+                        report.conflict_strategy
+                    )
+                }
+                .into(),
+            );
+            state.set_join_loss_summary(report.data_loss_hint.clone().into());
+        } else {
+            state.set_join_match_summary("尚未执行融合".into());
+            state.set_join_unmatched_summary("尚未生成未匹配统计".into());
+            state.set_join_conflict_summary("尚未生成冲突字段清单".into());
+            state.set_join_loss_summary("尚未生成数据丢失提示".into());
+        }
     } else {
         state.set_selected_dataset_id(0);
         state.set_current_dataset_name("尚未导入数据".into());
@@ -1260,6 +1293,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_can_field_next(false);
         state.set_can_undo(false);
         state.set_can_redo(false);
+        state.set_join_target_hint("当前没有可融合的目标数据集".into());
         state.set_metrics(ModelRc::new(VecModel::from(Vec::<MetricCardData>::new())));
         state.set_columns(ModelRc::new(VecModel::from(Vec::<ColumnRowData>::new())));
         state.set_preview_rows(ModelRc::new(VecModel::from(Vec::<PreviewRowData>::new())));
@@ -1267,6 +1301,10 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_steps(ModelRc::new(VecModel::from(Vec::<StepRowData>::new())));
         state.set_mappings(ModelRc::new(VecModel::from(Vec::<MappingRowData>::new())));
         state.set_join_suggestions(ModelRc::new(VecModel::from(Vec::<JoinSuggestionData>::new())));
+        state.set_join_match_summary("尚未执行融合".into());
+        state.set_join_unmatched_summary("尚未生成未匹配统计".into());
+        state.set_join_conflict_summary("尚未生成冲突字段清单".into());
+        state.set_join_loss_summary("尚未生成数据丢失提示".into());
     }
 
     state.set_status_message(status.into());

@@ -90,6 +90,11 @@ export global AppState {
     in property <bool> can-preview-next;
     in property <bool> can-field-prev;
     in property <bool> can-field-next;
+    in property <string> join-target-hint;
+    in property <string> join-match-summary;
+    in property <string> join-unmatched-summary;
+    in property <string> join-conflict-summary;
+    in property <string> join-loss-summary;
 }
 
 export global FormState {
@@ -131,7 +136,9 @@ export global FormState {
     in-out property <string> join-dataset-id: "";
     in-out property <string> join-left-key;
     in-out property <string> join-right-key;
-    in-out property <string> join-kind: "left";
+    in-out property <string> join-kind: "左连接";
+    in-out property <string> join-scene: "试验采样数据 + 指标汇总表";
+    in-out property <string> join-conflict-mode: "冲突列追加_right";
     in-out property <string> filter-column;
     in-out property <string> filter-keyword;
     in-out property <string> range-start: "1";

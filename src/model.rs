@@ -390,6 +390,31 @@ impl JoinKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum JoinConflictStrategy {
+    AppendRightSuffix,
+    PrefixRightMarker,
+    KeepLeftOnly,
+}
+
+impl JoinConflictStrategy {
+    pub fn from_text(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "right_prefix" | "冲突列追加right前缀" => Self::PrefixRightMarker,
+            "keep_left_only" | "仅保留主表字段" => Self::KeepLeftOnly,
+            _ => Self::AppendRightSuffix,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AppendRightSuffix => "冲突列追加_right",
+            Self::PrefixRightMarker => "冲突列追加right前缀",
+            Self::KeepLeftOnly => "仅保留主表字段",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TextCaseMode {
     Upper,
     Lower,

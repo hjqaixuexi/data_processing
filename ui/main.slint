@@ -76,6 +76,42 @@ component SummaryLine inherits Rectangle {
     }
 }
 
+component InfoCard inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    in property <length> card-min-height: 72px;
+
+    min-height: root.card-min-height;
+    background: AppTheme.panel-muted;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    border-radius: 3px;
+
+    VerticalBox {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 4px;
+
+        Text {
+            text: root.title;
+            color: AppTheme.text-soft;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        Text {
+            text: root.value;
+            color: AppTheme.text;
+            font-size: 10px;
+            wrap: word-wrap;
+        }
+    }
+}
+
 component InlineActionButton inherits VerticalBox {
     in property <string> label;
     in property <bool> primary: false;
@@ -224,51 +260,6 @@ component IssueRow inherits Rectangle {
     }
 }
 
-component JoinRow inherits Rectangle {
-    in property <string> target-dataset;
-    in property <string> left-key;
-    in property <string> right-key;
-    in property <string> join-type;
-    in property <string> reason;
-
-    min-height: 34px;
-    background: AppTheme.panel-bg;
-    border-width: 1px;
-    border-color: AppTheme.border;
-
-    HorizontalBox {
-        width: parent.width;
-        height: parent.height;
-        spacing: 0px;
-
-        LedgerCell {
-            cell-width: 180px;
-            value: root.target-dataset;
-        }
-
-        LedgerCell {
-            cell-width: 150px;
-            value: root.left-key;
-        }
-
-        LedgerCell {
-            cell-width: 150px;
-            value: root.right-key;
-        }
-
-        LedgerCell {
-            cell-width: 88px;
-            value: root.join-type;
-            center: true;
-        }
-
-        LedgerCell {
-            cell-width: 350px;
-            value: root.reason;
-        }
-    }
-}
-
 component StepRow inherits Rectangle {
     in property <string> time;
     in property <string> action;
@@ -324,6 +315,8 @@ export component MainWindow inherits Window {
     private property <length> derive-panel-gap: 8px;
     private property <length> derive-bottom-padding: 260px;
     private property <length> derive-content-height: 256px + 148px + 188px + 300px + 3 * root.derive-panel-gap + root.derive-bottom-padding;
+    private property <length> join-panel-gap: 8px;
+    private property <length> join-bottom-padding: 48px;
 
     title: "工程数据处理台";
     preferred-width: 1500px;
@@ -2382,136 +2375,255 @@ export component MainWindow inherits Window {
                                 y: 0px;
                                 width: parent.width;
                                 height: parent.height;
-                                background: transparent;
+                                background: AppTheme.window-bg;
                                 clip: true;
 
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    vertical-stretch: 1;
-                                    min-width: 0px;
-                                    min-height: 0px;
-                                    spacing: 8px;
+                                join-page-scroll := ScrollView {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                    vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                    viewport-width: self.visible-width;
+                                    viewport-height: max(self.visible-height, join-scroll-content.preferred-height);
 
-                                    Panel {
-                                        title: "融合建议";
-                                        subtitle: "";
-                                        horizontal-stretch: 1;
+                                    join-scroll-body := Rectangle {
+                                        width: join-page-scroll.visible-width;
+                                        height: max(join-page-scroll.visible-height, join-scroll-content.preferred-height);
+                                        background: transparent;
 
-                                        Rectangle {
-                                            height: 240px;
-                                            background: AppTheme.panel-bg;
-                                            border-width: 1px;
-                                            border-color: AppTheme.border;
-                                            clip: true;
+                                        join-scroll-content := VerticalBox {
+                                            width: parent.width;
+                                            spacing: root.join-panel-gap;
 
-                                            ScrollView {
-                                                join-table := Rectangle {
-                                                    width: 920px;
-                                                    height: join-content.preferred-height;
-                                                    background: AppTheme.panel-bg;
+                                            Panel {
+                                                title: "7.1 关联方式";
+                                                subtitle: FormState.join-kind == "内连接"
+                                                    ? "仅保留左右表都能匹配到的记录，适合强调精确命中的融合。"
+                                                    : FormState.join-kind == "外连接"
+                                                    ? "保留左右表全部记录，未匹配字段会出现空值，适合先全面对齐再回查。"
+                                                    : "以当前选中数据集为主表保留全部主表记录，适合工程台账式融合。";
+                                                horizontal-stretch: 1;
 
-                                                    join-content := VerticalBox {
-                                                        width: parent.width;
-                                                        spacing: 0px;
+                                                HorizontalBox {
+                                                    spacing: 6px;
 
-                                                        HorizontalBox {
-                                                            spacing: 0px;
-                                                            LedgerHeaderCell {
-                                                                cell-width: 180px;
-                                                                label: "目标数据集";
-                                                            }
+                                                    LabeledChoice {
+                                                        width: 180px;
+                                                        label: "连接类型";
+                                                        model: ["左连接", "内连接", "外连接"];
+                                                        value <=> FormState.join-kind;
+                                                    }
 
-                                                            LedgerHeaderCell {
-                                                                cell-width: 150px;
-                                                                label: "左表键";
-                                                            }
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        min-width: 0px;
+                                                    }
 
-                                                            LedgerHeaderCell {
-                                                                cell-width: 150px;
-                                                                label: "右表键";
-                                                            }
+                                                    InlineActionButton {
+                                                        width: 96px;
+                                                        label: "执行融合";
+                                                        primary: true;
+                                                        pressed => { Logic.apply-join(); }
+                                                    }
+                                                }
+                                            }
 
-                                                            LedgerHeaderCell {
-                                                                cell-width: 88px;
-                                                                label: "连接";
-                                                                center: true;
-                                                            }
+                                            Panel {
+                                                title: "7.2 融合场景";
+                                                subtitle: "根据场景模板快速确定常见的匹配键思路。";
+                                                horizontal-stretch: 1;
 
-                                                            LedgerHeaderCell {
-                                                                cell-width: 350px;
-                                                                label: "原因";
+                                                VerticalBox {
+                                                    spacing: 6px;
+
+                                                    LabeledChoice {
+                                                        width: 280px;
+                                                        label: "场景模板";
+                                                        model: [
+                                                            "试验采样数据 + 指标汇总表",
+                                                            "设备状态数据 + 测试结果数据",
+                                                            "仿真结果数据 + 实测数据",
+                                                            "配置参数 + 输出结果"
+                                                        ];
+                                                        value <=> FormState.join-scene;
+                                                    }
+
+                                                    Text {
+                                                        color: AppTheme.text-soft;
+                                                        font-size: 10px;
+                                                        wrap: word-wrap;
+                                                        text: FormState.join-scene == "设备状态数据 + 测试结果数据"
+                                                            ? "优先考虑设备编号、批次号或测试序列号作为匹配键。"
+                                                            : FormState.join-scene == "仿真结果数据 + 实测数据"
+                                                            ? "优先统一工况编号、时刻点或试验编号后再做融合。"
+                                                            : FormState.join-scene == "配置参数 + 输出结果"
+                                                            ? "优先使用配置编号、版本号或参数组编码。"
+                                                            : "优先使用采样编号、样品编号或记录批次。";
+                                                    }
+                                                }
+                                            }
+
+                                            Panel {
+                                                title: "7.3 融合过程控制";
+                                                subtitle: "先确认主表和目标表，再填写两侧匹配字段与冲突字段处理方式。";
+                                                horizontal-stretch: 1;
+
+                                                VerticalBox {
+                                                    spacing: 6px;
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        Rectangle {
+                                                            horizontal-stretch: 1;
+                                                            min-width: 0px;
+                                                            min-height: 54px;
+                                                            background: AppTheme.panel-muted;
+                                                            border-width: 1px;
+                                                            border-color: AppTheme.border;
+                                                            border-radius: 3px;
+
+                                                            VerticalBox {
+                                                                width: parent.width;
+                                                                height: parent.height;
+                                                                padding-left: 8px;
+                                                                padding-right: 8px;
+                                                                padding-top: 6px;
+                                                                padding-bottom: 6px;
+                                                                spacing: 4px;
+
+                                                                Text {
+                                                                    text: "主表";
+                                                                    color: AppTheme.text-soft;
+                                                                    font-size: 10px;
+                                                                    font-weight: 600;
+                                                                }
+
+                                                                Text {
+                                                                    text: AppState.current-dataset-name;
+                                                                    color: AppTheme.text;
+                                                                    font-size: 11px;
+                                                                    font-weight: 700;
+                                                                    wrap: no-wrap;
+                                                                }
                                                             }
                                                         }
 
-                                                        for suggestion in AppState.join-suggestions: JoinRow {
-                                                            target-dataset: suggestion.target-dataset;
-                                                            left-key: suggestion.left-key;
-                                                            right-key: suggestion.right-key;
-                                                            join-type: suggestion.join-type;
-                                                            reason: suggestion.reason;
+                                                        LabeledField {
+                                                            width: 200px;
+                                                            label: "目标数据集编号";
+                                                            placeholder: "2";
+                                                            text <=> FormState.join-dataset-id;
+                                                        }
+
+                                                        InlineActionButton {
+                                                            width: 96px;
+                                                            label: "执行融合";
+                                                            primary: true;
+                                                            pressed => { Logic.apply-join(); }
+                                                        }
+                                                    }
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledField {
+                                                            width: 240px;
+                                                            label: "主表匹配字段";
+                                                            placeholder: "device_id";
+                                                            text <=> FormState.join-left-key;
+                                                        }
+
+                                                        LabeledField {
+                                                            width: 240px;
+                                                            label: "目标表匹配字段";
+                                                            placeholder: "device_id";
+                                                            text <=> FormState.join-right-key;
+                                                        }
+
+                                                        Rectangle {
+                                                            horizontal-stretch: 1;
+                                                            min-width: 0px;
+                                                        }
+                                                    }
+
+                                                    HorizontalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledChoice {
+                                                            width: 200px;
+                                                            label: "冲突字段命名";
+                                                            model: [
+                                                                "冲突列追加_right",
+                                                                "冲突列追加right前缀",
+                                                                "仅保留主表字段"
+                                                            ];
+                                                            value <=> FormState.join-conflict-mode;
+                                                        }
+
+                                                        InfoCard {
+                                                            horizontal-stretch: 1;
+                                                            card-min-height: 54px;
+                                                            title: "可选目标 / 结果预览";
+                                                            value: AppState.join-target-hint + " | 执行后会生成新的融合结果数据集并自动切换。";
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    Panel {
-                                        title: "手工融合";
-                                        subtitle: "";
-                                        horizontal-stretch: 1;
+                                            Panel {
+                                                title: "7.4 融合结果检查";
+                                                subtitle: "执行融合后在这里查看匹配结果与风险提示。";
+                                                horizontal-stretch: 1;
 
-                                        VerticalBox {
-                                            spacing: 6px;
+                                                VerticalBox {
+                                                    spacing: 6px;
 
-                                            HorizontalBox {
-                                                spacing: 6px;
+                                                    HorizontalBox {
+                                                        spacing: 6px;
 
-                                                LabeledField {
-                                                    width: 160px;
-                                                    label: "目标数据集编号";
-                                                    placeholder: "2";
-                                                    text <=> FormState.join-dataset-id;
-                                                }
+                                                        InfoCard {
+                                                            horizontal-stretch: 1;
+                                                            card-min-height: 72px;
+                                                            title: "成功匹配数";
+                                                            value: AppState.join-match-summary;
+                                                        }
 
-                                                LabeledField {
-                                                    width: 210px;
-                                                    label: "左表键";
-                                                    placeholder: "device_id";
-                                                    text <=> FormState.join-left-key;
-                                                }
+                                                        InfoCard {
+                                                            horizontal-stretch: 1;
+                                                            card-min-height: 72px;
+                                                            title: "未匹配数";
+                                                            value: AppState.join-unmatched-summary;
+                                                        }
+                                                    }
 
-                                                LabeledField {
-                                                    width: 210px;
-                                                    label: "右表键";
-                                                    placeholder: "device_id";
-                                                    text <=> FormState.join-right-key;
-                                                }
-                                            }
+                                                    HorizontalBox {
+                                                        spacing: 6px;
 
-                                            HorizontalBox {
-                                                spacing: 6px;
+                                                        InfoCard {
+                                                            horizontal-stretch: 1;
+                                                            card-min-height: 72px;
+                                                            title: "冲突字段清单";
+                                                            value: AppState.join-conflict-summary;
+                                                        }
 
-                                                LabeledChoice {
-                                                    width: 160px;
-                                                    label: "连接类型";
-                                                    model: ["left", "inner", "outer"];
-                                                    value <=> FormState.join-kind;
-                                                }
-
-                                                InlineActionButton {
-                                                    width: 96px;
-                                                    label: "执行融合";
-                                                    primary: true;
-                                                    pressed => { Logic.apply-join(); }
+                                                        InfoCard {
+                                                            horizontal-stretch: 1;
+                                                            card-min-height: 72px;
+                                                            title: "数据丢失提示";
+                                                            value: AppState.join-loss-summary;
+                                                        }
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    Rectangle {
-                                        vertical-stretch: 1;
-                                        background: transparent;
+                                            Rectangle {
+                                                height: root.join-bottom-padding;
+                                                background: transparent;
+                                            }
+                                        }
                                     }
                                 }
                             }
