@@ -32,10 +32,10 @@ def main() -> int:
         ["源文件", payload["source_path"]],
         ["导入时间", payload["imported_at"]],
         ["工作表规模", f'{payload["row_count"]} 行 × {payload["column_count"]} 列'],
-        ["主键候选", join_text(payload.get("key_candidates", []))],
-        ["时间候选", join_text(payload.get("time_candidates", []))],
+        ["主键候选", join_text(payload.get("key_candidates", []), chunk_size=6)],
+        ["时间候选", join_text(payload.get("time_candidates", []), chunk_size=6)],
         ["生效主键", blank_to_dash(payload.get("resolved_primary_key"))],
-        ["组合字段", join_text(payload.get("resolved_composite_keys", []))],
+        ["组合字段", join_text(payload.get("resolved_composite_keys", []), chunk_size=6)],
         ["时间序列列", blank_to_dash(payload.get("resolved_time_column"))],
     ]
     story.append(section_title("概况", styles))
@@ -46,7 +46,7 @@ def main() -> int:
     rule_rows = [
         ["高缺失阈值", f'{float(rules.get("high_missing_threshold", 0.3)) * 100:.0f}%'],
         ["指定主键", blank_to_dash(rules.get("primary_key"))],
-        ["指定组合键", join_text(rules.get("composite_keys", []))],
+        ["指定组合键", join_text(rules.get("composite_keys", []), chunk_size=6)],
         ["指定时间列", blank_to_dash(rules.get("time_column"))],
     ]
     story.append(section_title("规则配置", styles))
@@ -252,9 +252,19 @@ def escape_text(value: str) -> str:
     )
 
 
-def join_text(values) -> str:
-    filtered = [str(value) for value in values if str(value).strip()]
-    return "，".join(filtered) if filtered else "-"
+def join_text(values, chunk_size: int | None = None) -> str:
+    filtered = [escape_text(str(value).strip()) for value in values if str(value).strip()]
+    if not filtered:
+        return "-"
+
+    if chunk_size and chunk_size > 0:
+        groups = [
+            "，".join(filtered[index : index + chunk_size])
+            for index in range(0, len(filtered), chunk_size)
+        ]
+        return "<br/>".join(groups)
+
+    return "，".join(filtered)
 
 
 def blank_to_dash(value) -> str:

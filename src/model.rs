@@ -260,6 +260,12 @@ pub struct QualityRules {
     pub composite_keys: Vec<String>,
     pub time_column: String,
     pub high_missing_threshold: f32,
+    pub range_column: String,
+    pub range_min: Option<f64>,
+    pub range_max: Option<f64>,
+    pub length_column: String,
+    pub max_text_length: Option<usize>,
+    pub time_gap_minutes: Option<i64>,
 }
 
 impl Default for QualityRules {
@@ -269,6 +275,12 @@ impl Default for QualityRules {
             composite_keys: Vec::new(),
             time_column: String::new(),
             high_missing_threshold: 0.3,
+            range_column: String::new(),
+            range_min: None,
+            range_max: None,
+            length_column: String::new(),
+            max_text_length: None,
+            time_gap_minutes: None,
         }
     }
 }
@@ -295,6 +307,8 @@ pub struct QualityOverview {
     pub mixed_type_column_count: usize,
     pub time_order_issue_count: usize,
     pub range_rule_issue_count: usize,
+    pub text_length_issue_count: usize,
+    pub time_gap_issue_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

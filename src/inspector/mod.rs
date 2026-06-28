@@ -191,9 +191,51 @@ pub fn build_profile(table: &DataTable, rules: &QualityRules) -> DatasetProfile 
                 category: "时间规则".to_string(),
                 severity: "中".to_string(),
                 field: resolved_time_column.clone(),
-                detail: format!("时间序列中检测到 {} 处逆序或异常跳变", order_issue_count),
+                detail: format!("时间序列中检测到 {} 处逆序记录", order_issue_count),
             });
         }
+
+        if let Some(limit_minutes) = rules.time_gap_minutes.filter(|value| *value > 0) {
+            if let Some((gap_issue_count, max_gap_minutes)) =
+                detect_time_gap_issues(table, &resolved_time_column, limit_minutes)
+            {
+                overview.time_gap_issue_count = gap_issue_count;
+                issues.push(QualityIssue {
+                    category: "时间间隔".to_string(),
+                    severity: "中".to_string(),
+                    field: resolved_time_column.clone(),
+                    detail: format!(
+                        "相邻时间戳有 {} 处间隔超过 {} 分钟，最大间隔 {} 分钟",
+                        gap_issue_count, limit_minutes, max_gap_minutes
+                    ),
+                });
+            }
+        }
+    }
+
+    if let Some((field, issue_count, rule_detail)) = detect_range_rule_issues(table, rules) {
+        overview.range_rule_issue_count = issue_count;
+        issues.push(QualityIssue {
+            category: "范围规则".to_string(),
+            severity: "高".to_string(),
+            field,
+            detail: rule_detail,
+        });
+    }
+
+    if let Some((field, issue_count, max_length, longest_length)) =
+        detect_text_length_issues(table, rules)
+    {
+        overview.text_length_issue_count = issue_count;
+        issues.push(QualityIssue {
+            category: "文本长度".to_string(),
+            severity: "中".to_string(),
+            field,
+            detail: format!(
+                "检测到 {} 个值超过 {} 个字符，最长达到 {} 个字符",
+                issue_count, max_length, longest_length
+            ),
+        });
     }
 
     DatasetProfile {
@@ -539,6 +581,113 @@ fn detect_time_order_issues(table: &DataTable, column_name: &str) -> usize {
     }
 
     issues
+}
+
+fn detect_time_gap_issues(
+    table: &DataTable,
+    column_name: &str,
+    limit_minutes: i64,
+) -> Option<(usize, i64)> {
+    let Some(column) = table.columns.iter().find(|column| column.name == column_name) else {
+        return None;
+    };
+
+    let mut previous: Option<NaiveDateTime> = None;
+    let mut issue_count = 0usize;
+    let mut max_gap_minutes = 0i64;
+
+    for value in column.values.iter().filter_map(|value| normalize_cell(value.as_ref())) {
+        let Some(current) = parse_datetime_value(&value) else {
+            continue;
+        };
+
+        if let Some(previous_value) = previous {
+            if current >= previous_value {
+                let gap_minutes = current.signed_duration_since(previous_value).num_minutes();
+                if gap_minutes > limit_minutes {
+                    issue_count += 1;
+                    max_gap_minutes = max_gap_minutes.max(gap_minutes);
+                }
+            }
+        }
+        previous = Some(current);
+    }
+
+    (issue_count > 0).then_some((issue_count, max_gap_minutes))
+}
+
+fn detect_range_rule_issues(
+    table: &DataTable,
+    rules: &QualityRules,
+) -> Option<(String, usize, String)> {
+    let column_name = rules.range_column.trim();
+    if column_name.is_empty() {
+        return None;
+    }
+
+    let Some(column) = table.columns.iter().find(|column| column.name == column_name) else {
+        return None;
+    };
+
+    let min_value = rules.range_min;
+    let max_value = rules.range_max;
+    if min_value.is_none() && max_value.is_none() {
+        return None;
+    }
+
+    let issue_count = column
+        .values
+        .iter()
+        .filter_map(|value| normalize_cell(value.as_ref()))
+        .filter_map(|value| value.parse::<f64>().ok())
+        .filter(|value| {
+            min_value.map(|min| *value < min).unwrap_or(false)
+                || max_value.map(|max| *value > max).unwrap_or(false)
+        })
+        .count();
+
+    if issue_count == 0 {
+        return None;
+    }
+
+    let rule_detail = match (min_value, max_value) {
+        (Some(min), Some(max)) => {
+            format!("检测到 {} 个值不在 [{}, {}] 范围内", issue_count, min, max)
+        }
+        (Some(min), None) => format!("检测到 {} 个值小于最小值 {}", issue_count, min),
+        (None, Some(max)) => format!("检测到 {} 个值大于最大值 {}", issue_count, max),
+        (None, None) => return None,
+    };
+
+    Some((column.name.clone(), issue_count, rule_detail))
+}
+
+fn detect_text_length_issues(
+    table: &DataTable,
+    rules: &QualityRules,
+) -> Option<(String, usize, usize, usize)> {
+    let column_name = rules.length_column.trim();
+    let max_length = rules.max_text_length?;
+    if column_name.is_empty() {
+        return None;
+    }
+
+    let Some(column) = table.columns.iter().find(|column| column.name == column_name) else {
+        return None;
+    };
+
+    let mut issue_count = 0usize;
+    let mut longest_length = 0usize;
+
+    for value in column.values.iter().filter_map(|value| normalize_cell(value.as_ref())) {
+        let length = value.chars().count();
+        if length > max_length {
+            issue_count += 1;
+            longest_length = longest_length.max(length);
+        }
+    }
+
+    (issue_count > 0).then_some((column.name.clone(), issue_count, max_length, longest_length))
 }
 
 fn classify_value_kind(value: &str) -> String {

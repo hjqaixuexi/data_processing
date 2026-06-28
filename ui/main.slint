@@ -935,8 +935,121 @@ export component MainWindow inherits Window {
                                     }
 
                                     Panel {
+                                        title: "质量规则";
+                                        subtitle: AppState.quality-rule-summary;
+                                        horizontal-stretch: 1;
+
+                                        VerticalBox {
+                                            spacing: 6px;
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 150px;
+                                                    label: "主键";
+                                                    placeholder: "如 id";
+                                                    text <=> FormState.quality-primary-key;
+                                                }
+
+                                                LabeledField {
+                                                    width: 250px;
+                                                    label: "组合键";
+                                                    placeholder: "逗号分隔，如 batch_id, device_id";
+                                                    text <=> FormState.quality-composite-keys;
+                                                }
+
+                                                LabeledField {
+                                                    width: 150px;
+                                                    label: "时间列";
+                                                    placeholder: "如 created_at";
+                                                    text <=> FormState.quality-time-column;
+                                                }
+
+                                                LabeledField {
+                                                    width: 120px;
+                                                    label: "高缺失阈值(%)";
+                                                    placeholder: "5 - 95";
+                                                    text <=> FormState.quality-missing-threshold;
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                    min-width: 0px;
+                                                }
+                                            }
+
+                                            HorizontalBox {
+                                                spacing: 6px;
+
+                                                LabeledField {
+                                                    width: 160px;
+                                                    label: "数值列";
+                                                    placeholder: "如 temperature";
+                                                    text <=> FormState.quality-range-column;
+                                                }
+
+                                                LabeledField {
+                                                    width: 100px;
+                                                    label: "最小值";
+                                                    placeholder: "可留空";
+                                                    text <=> FormState.quality-range-min;
+                                                }
+
+                                                LabeledField {
+                                                    width: 100px;
+                                                    label: "最大值";
+                                                    placeholder: "可留空";
+                                                    text <=> FormState.quality-range-max;
+                                                }
+
+                                                LabeledField {
+                                                    width: 160px;
+                                                    label: "文本列";
+                                                    placeholder: "如 device_name";
+                                                    text <=> FormState.quality-text-column;
+                                                }
+
+                                                LabeledField {
+                                                    width: 110px;
+                                                    label: "最大长度";
+                                                    placeholder: "字符数";
+                                                    text <=> FormState.quality-max-length;
+                                                }
+
+                                                LabeledField {
+                                                    width: 130px;
+                                                    label: "时间间隔(分钟)";
+                                                    placeholder: "如 60";
+                                                    text <=> FormState.quality-time-gap-minutes;
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                    min-width: 0px;
+                                                }
+
+                                                Rectangle {
+                                                    width: 110px;
+                                                    height: 48px;
+                                                    background: transparent;
+
+                                                    Button {
+                                                        y: 20px;
+                                                        width: parent.width;
+                                                        height: 28px;
+                                                        text: "应用规则";
+                                                        primary: true;
+                                                        clicked => { Logic.apply-quality-rules(); }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
                                         title: "问题台账";
-                                        subtitle: "";
+                                        subtitle: AppState.quality-summary;
                                         horizontal-stretch: 1;
                                         vertical-stretch: 1;
 

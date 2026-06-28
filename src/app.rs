@@ -154,7 +154,15 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                 let status = service
                     .update_quality_rules(
                         &form.get_quality_primary_key().to_string(),
+                        &form.get_quality_composite_keys().to_string(),
                         &form.get_quality_time_column().to_string(),
+                        &form.get_quality_missing_threshold().to_string(),
+                        &form.get_quality_range_column().to_string(),
+                        &form.get_quality_range_min().to_string(),
+                        &form.get_quality_range_max().to_string(),
+                        &form.get_quality_text_column().to_string(),
+                        &form.get_quality_max_length().to_string(),
+                        &form.get_quality_time_gap_minutes().to_string(),
                     )
                     .unwrap_or_else(|error| format!("质量设置更新失败：{error:#}"));
                 refresh_ui(ui, service, &status);
@@ -717,7 +725,45 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             form.set_preview_page(1);
             form.set_field_page(1);
             form.set_quality_primary_key(record.quality_rules.primary_key.clone().into());
+            form.set_quality_composite_keys(record.quality_rules.composite_keys.join(", ").into());
             form.set_quality_time_column(record.quality_rules.time_column.clone().into());
+            form.set_quality_missing_threshold(
+                format_threshold_percent(record.quality_rules.normalized_threshold()).into(),
+            );
+            form.set_quality_range_column(record.quality_rules.range_column.clone().into());
+            form.set_quality_range_min(
+                record
+                    .quality_rules
+                    .range_min
+                    .map(|value| value.to_string())
+                    .unwrap_or_default()
+                    .into(),
+            );
+            form.set_quality_range_max(
+                record
+                    .quality_rules
+                    .range_max
+                    .map(|value| value.to_string())
+                    .unwrap_or_default()
+                    .into(),
+            );
+            form.set_quality_text_column(record.quality_rules.length_column.clone().into());
+            form.set_quality_max_length(
+                record
+                    .quality_rules
+                    .max_text_length
+                    .map(|value| value.to_string())
+                    .unwrap_or_default()
+                    .into(),
+            );
+            form.set_quality_time_gap_minutes(
+                record
+                    .quality_rules
+                    .time_gap_minutes
+                    .map(|value| value.to_string())
+                    .unwrap_or_default()
+                    .into(),
+            );
         }
 
         let preview_size = parse_bounded_usize(&form.get_preview_row_count().to_string(), 20, 1, 200);
@@ -752,21 +798,19 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         );
         state.set_quality_summary(
             format!(
-                "问题 {} 项，高缺失 {} 列，重复 {} 行，空记录 {} 行",
+                "问题 {} 项，高缺失 {} 列，重复 {} 行，空记录 {} 行，自定义规则触发 {} 项",
                 record.profile.quality_issues.len(),
                 record.profile.quality_overview.high_missing_field_count,
                 record.profile.quality_overview.duplicate_row_count,
-                record.profile.quality_overview.fully_empty_row_count
+                record.profile.quality_overview.fully_empty_row_count,
+                record.profile.quality_overview.range_rule_issue_count
+                    + record.profile.quality_overview.text_length_issue_count
+                    + record.profile.quality_overview.time_gap_issue_count
             )
             .into(),
         );
         state.set_quality_rule_summary(
-            format!(
-                "主键 [{}] | 时间列 [{}]",
-                display_or_fallback(&record.profile.resolved_primary_key, "未识别"),
-                display_or_fallback(&record.profile.resolved_time_column, "未识别")
-            )
-            .into(),
+            build_quality_rule_summary(record).into(),
         );
         state.set_active_count_label(
             format!(
@@ -852,8 +896,19 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_current_dataset_overview("点击左侧导入按钮开始".into());
         state.set_quality_summary("暂无分析结果".into());
         form.set_quality_primary_key(SharedString::new());
+        form.set_quality_composite_keys(SharedString::new());
         form.set_quality_time_column(SharedString::new());
-        state.set_quality_rule_summary("主键 [未识别] | 时间列 [未识别]".into());
+        form.set_quality_missing_threshold("30".into());
+        form.set_quality_range_column(SharedString::new());
+        form.set_quality_range_min(SharedString::new());
+        form.set_quality_range_max(SharedString::new());
+        form.set_quality_text_column(SharedString::new());
+        form.set_quality_max_length(SharedString::new());
+        form.set_quality_time_gap_minutes(SharedString::new());
+        state.set_quality_rule_summary(
+            "主键 [未识别] | 组合键 [未设置] | 时间列 [未识别] | 缺失阈值 [30%] | 数值范围 [未设置] | 文本长度 [未设置] | 时间间隔 [未设置]"
+                .into(),
+        );
         state.set_active_count_label("等待导入".into());
         state.set_preview_columns(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
         state.set_preview_page_label("第 0 / 0 页".into());
@@ -1089,5 +1144,59 @@ fn display_or_fallback(value: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         value.to_string()
+    }
+}
+
+fn format_threshold_percent(value: f32) -> String {
+    format!("{:.0}", value * 100.0)
+}
+
+fn build_quality_rule_summary(record: &DatasetRecord) -> String {
+    let composite = if record.profile.resolved_composite_keys.is_empty() {
+        "未设置".to_string()
+    } else {
+        record.profile.resolved_composite_keys.join(", ")
+    };
+
+    format!(
+        "主键 [{}] | 组合键 [{}] | 时间列 [{}] | 缺失阈值 [{}%] | 数值范围 [{}] | 文本长度 [{}] | 时间间隔 [{}]",
+        display_or_fallback(&record.profile.resolved_primary_key, "未识别"),
+        composite,
+        display_or_fallback(&record.profile.resolved_time_column, "未识别"),
+        format_threshold_percent(record.quality_rules.normalized_threshold()),
+        describe_range_rule(record),
+        describe_length_rule(record),
+        describe_time_gap_rule(record),
+    )
+}
+
+fn describe_range_rule(record: &DatasetRecord) -> String {
+    let column = record.quality_rules.range_column.trim();
+    if column.is_empty()
+        || (record.quality_rules.range_min.is_none() && record.quality_rules.range_max.is_none())
+    {
+        return "未设置".to_string();
+    }
+
+    match (record.quality_rules.range_min, record.quality_rules.range_max) {
+        (Some(min), Some(max)) => format!("{column}: {min} ~ {max}"),
+        (Some(min), None) => format!("{column}: >= {min}"),
+        (None, Some(max)) => format!("{column}: <= {max}"),
+        (None, None) => "未设置".to_string(),
+    }
+}
+
+fn describe_length_rule(record: &DatasetRecord) -> String {
+    let column = record.quality_rules.length_column.trim();
+    match (column.is_empty(), record.quality_rules.max_text_length) {
+        (false, Some(limit)) => format!("{column} <= {limit}"),
+        _ => "未设置".to_string(),
+    }
+}
+
+fn describe_time_gap_rule(record: &DatasetRecord) -> String {
+    match record.quality_rules.time_gap_minutes {
+        Some(minutes) if minutes > 0 => format!("{minutes} 分钟"),
+        _ => "未设置".to_string(),
     }
 }

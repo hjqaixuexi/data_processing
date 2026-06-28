@@ -297,24 +297,95 @@ impl AppService {
         )
     }
 
-    pub fn update_quality_rules(&mut self, primary_key: &str, time_column: &str) -> Result<String> {
+    pub fn update_quality_rules(
+        &mut self,
+        primary_key: &str,
+        composite_keys: &str,
+        time_column: &str,
+        high_missing_threshold: &str,
+        range_column: &str,
+        range_min: &str,
+        range_max: &str,
+        length_column: &str,
+        max_text_length: &str,
+        time_gap_minutes: &str,
+    ) -> Result<String> {
         let record = self.selected_dataset_mut()?;
         validate_optional_column(&record.working_table, primary_key)?;
+        let composite_keys = split_csv_like(composite_keys);
+        validate_column_list(&record.working_table, &composite_keys)?;
         validate_optional_column(&record.working_table, time_column)?;
+        validate_optional_column(&record.working_table, range_column)?;
+        validate_optional_column(&record.working_table, length_column)?;
+
+        if !composite_keys.is_empty() && composite_keys.len() < 2 {
+            bail!("组合键至少需要填写两个字段");
+        }
+
+        let high_missing_threshold =
+            parse_threshold_percent(high_missing_threshold, record.quality_rules.normalized_threshold() * 100.0)?
+                / 100.0;
+        let range_min = parse_optional_f64(range_min, "范围最小值")?;
+        let range_max = parse_optional_f64(range_max, "范围最大值")?;
+        let max_text_length = parse_optional_usize(max_text_length, "最大长度")?;
+        let time_gap_minutes = parse_optional_i64(time_gap_minutes, "时间间隔")?;
+
+        let has_range_rule = !range_column.trim().is_empty() || range_min.is_some() || range_max.is_some();
+        if has_range_rule {
+            if range_column.trim().is_empty() {
+                bail!("设置数值范围规则时必须指定字段");
+            }
+            if range_min.is_none() && range_max.is_none() {
+                bail!("数值范围规则至少需要填写最小值或最大值");
+            }
+            if let (Some(min), Some(max)) = (range_min, range_max) {
+                if min > max {
+                    bail!("数值范围规则的最小值不能大于最大值");
+                }
+            }
+        }
+
+        let has_length_rule = !length_column.trim().is_empty() || max_text_length.is_some();
+        if has_length_rule {
+            if length_column.trim().is_empty() {
+                bail!("设置文本长度规则时必须指定字段");
+            }
+            if max_text_length.is_none() {
+                bail!("文本长度规则必须填写最大长度");
+            }
+        }
+
+        if time_gap_minutes.is_some() && !record.working_table.columns.iter().any(|column| {
+            column.name == time_column.trim()
+                || (time_column.trim().is_empty()
+                    && (column.logical_type == LogicalType::DateTime
+                        || column.values.iter().flatten().any(|value| crate::model::looks_like_datetime(value))))
+        }) {
+            bail!("设置时间间隔规则前，请先指定可识别的时间字段");
+        }
 
         record.quality_rules = QualityRules {
             primary_key: primary_key.trim().to_string(),
-            composite_keys: Vec::new(),
+            composite_keys,
             time_column: time_column.trim().to_string(),
-            high_missing_threshold: record.quality_rules.high_missing_threshold,
+            high_missing_threshold,
+            range_column: range_column.trim().to_string(),
+            range_min,
+            range_max,
+            length_column: length_column.trim().to_string(),
+            max_text_length,
+            time_gap_minutes,
         };
         self.refresh_selected_record()?;
 
         let record = self.selected_dataset().context("当前没有选中数据集")?;
         Ok(format!(
-            "质量设置已更新：主键 [{}]，时间列 [{}]",
+            "质量规则已更新：主键 [{}]，组合键 [{}]，时间列 [{}]，缺失阈值 [{:.0}%]",
             display_optional_text(&record.quality_rules.primary_key),
+            display_optional_vec(&record.quality_rules.composite_keys),
             display_optional_text(&record.quality_rules.time_column)
+            ,
+            record.quality_rules.normalized_threshold() * 100.0
         ))
     }
 
@@ -596,10 +667,88 @@ fn validate_optional_column(table: &crate::model::DataTable, column_name: &str) 
     }
 }
 
+fn validate_column_list(table: &crate::model::DataTable, column_names: &[String]) -> Result<()> {
+    for column_name in column_names {
+        validate_optional_column(table, column_name)?;
+    }
+    Ok(())
+}
+
 fn display_optional_text(value: &str) -> &str {
     if value.trim().is_empty() {
         "未设置"
     } else {
         value
     }
+}
+
+fn display_optional_vec(values: &[String]) -> String {
+    if values.is_empty() {
+        "未设置".to_string()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn split_csv_like(value: &str) -> Vec<String> {
+    value
+        .split([',', '，', ';', '；'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_threshold_percent(value: &str, default_percent: f32) -> Result<f32> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(default_percent);
+    }
+
+    let parsed = trimmed
+        .parse::<f32>()
+        .with_context(|| format!("缺失阈值解析失败: {trimmed}"))?;
+    if !(5.0..=95.0).contains(&parsed) {
+        bail!("缺失阈值必须在 5 到 95 之间");
+    }
+    Ok(parsed)
+}
+
+fn parse_optional_f64(value: &str, label: &str) -> Result<Option<f64>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let parsed = trimmed
+        .parse::<f64>()
+        .with_context(|| format!("{label} 解析失败: {trimmed}"))?;
+    Ok(Some(parsed))
+}
+
+fn parse_optional_usize(value: &str, label: &str) -> Result<Option<usize>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let parsed = trimmed
+        .parse::<usize>()
+        .with_context(|| format!("{label} 解析失败: {trimmed}"))?;
+    if parsed == 0 {
+        bail!("{label} 必须大于 0");
+    }
+    Ok(Some(parsed))
+}
+
+fn parse_optional_i64(value: &str, label: &str) -> Result<Option<i64>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let parsed = trimmed
+        .parse::<i64>()
+        .with_context(|| format!("{label} 解析失败: {trimmed}"))?;
+    if parsed <= 0 {
+        bail!("{label} 必须大于 0");
+    }
+    Ok(Some(parsed))
 }
