@@ -416,12 +416,21 @@ export component MainWindow inherits Window {
                         border-width: 1px;
                         border-color: AppTheme.border;
 
-                        ScrollView {
-                            VerticalBox {
+                        dataset-scroll := ScrollView {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                            viewport-width: self.visible-width;
+
+                            dataset-list := VerticalBox {
+                                width: dataset-scroll.visible-width;
                                 spacing: 4px;
                                 padding: 4px;
 
                                 for dataset in AppState.datasets: DatasetRow {
+                                    width: dataset-list.width - 8px;
                                     dataset: dataset;
                                     selected: AppState.selected-dataset-id == dataset.dataset-id;
                                     activated(id) => { Logic.select-dataset(id); }

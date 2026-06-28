@@ -72,19 +72,25 @@ export component DatasetRow inherits Rectangle {
     border-width: 1px;
     border-color: root.selected ? AppTheme.selected-border : AppTheme.border;
     border-radius: 3px;
-    min-height: 74px;
+    min-height: 86px;
+    max-height: 86px;
     clip: true;
 
     VerticalBox {
-        padding: 6px;
-        spacing: 3px;
+        width: parent.width;
+        height: parent.height;
+        padding: 5px;
+        spacing: 2px;
 
         HorizontalBox {
             spacing: 4px;
 
             StatusTag { label: dataset.format; }
 
-            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                horizontal-stretch: 1;
+                min-width: 0px;
+            }
 
             Text {
                 text: dataset.size-label;
@@ -96,7 +102,7 @@ export component DatasetRow inherits Rectangle {
         Text {
             text: dataset.name;
             color: AppTheme.text;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             wrap: no-wrap;
         }
@@ -111,8 +117,6 @@ export component DatasetRow inherits Rectangle {
                 font-size: 9px;
                 wrap: no-wrap;
             }
-
-            Rectangle { horizontal-stretch: 1; }
 
             Text {
                 text: dataset.imported-at;
