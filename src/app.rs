@@ -18,7 +18,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     let service = Rc::new(RefCell::new(AppService::new()));
 
     install_callbacks(&ui, service);
-    refresh_ui(&ui, &AppService::new(), "等待导入 xlsx / csv / json 数据集");
+    refresh_ui(&ui, &AppService::new(), "等待导入 xlsx / csv / tsv / txt 数据集");
     ui.run()
 }
 
@@ -29,7 +29,7 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         move || {
             with_ui(&weak, &service, |ui, service| {
                 let paths = FileDialog::new()
-                    .add_filter("Data Files", &["xlsx", "csv", "json"])
+                    .add_filter("Data Files", &["xlsx", "csv", "tsv", "txt"])
                     .pick_files()
                     .unwrap_or_default();
 
@@ -933,12 +933,26 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
     });
 
     let weak = ui.as_weak();
-    ui.global::<Logic>().on_export_json({
+    ui.global::<Logic>().on_export_tsv({
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let status = export_with_dialog("导出当前数据集为 JSON", "json", |path| {
-                    service.export_selected_json(&path)
+                let status = export_with_dialog("导出当前数据集为 TSV", "tsv", |path| {
+                    service.export_selected_tsv(&path)
+                })
+                .unwrap_or_else(|error| format!("导出失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_export_txt({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let status = export_with_dialog("导出当前数据集为 TXT", "txt", |path| {
+                    service.export_selected_txt(&path)
                 })
                 .unwrap_or_else(|error| format!("导出失败：{error:#}"));
                 refresh_ui(ui, service, &status);

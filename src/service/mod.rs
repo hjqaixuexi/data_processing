@@ -1081,7 +1081,7 @@ impl AppService {
             id: dataset_id,
             dataset_name: format!("{}_merge_{}", left.dataset_name, right.dataset_name),
             source_path: left.source_path.clone(),
-            format: FileFormat::Json,
+            format: FileFormat::Csv,
             size_bytes: 0,
             imported_at: Local::now(),
             import_duration_ms: None,
@@ -1156,10 +1156,16 @@ impl AppService {
         Ok(format!("已导出 CSV：{}", path.display()))
     }
 
-    pub fn export_selected_json(&self, path: &Path) -> Result<String> {
+    pub fn export_selected_tsv(&self, path: &Path) -> Result<String> {
         let record = self.selected_dataset().context("当前没有选中数据集")?;
-        exporter::export_dataset_json(record, path)?;
-        Ok(format!("已导出 JSON：{}", path.display()))
+        exporter::export_dataset_tsv(record, path)?;
+        Ok(format!("已导出 TSV：{}", path.display()))
+    }
+
+    pub fn export_selected_txt(&self, path: &Path) -> Result<String> {
+        let record = self.selected_dataset().context("当前没有选中数据集")?;
+        exporter::export_dataset_txt(record, path)?;
+        Ok(format!("已导出 TXT：{}", path.display()))
     }
 
     pub fn export_quality_report(&self, path: &Path) -> Result<String> {

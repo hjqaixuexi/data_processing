@@ -7,13 +7,32 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn export_dataset_csv(record: &DatasetRecord, path: &Path) -> Result<()> {
+    export_dataset_delimited(record, path, b',', "CSV")
+}
+
+pub fn export_dataset_tsv(record: &DatasetRecord, path: &Path) -> Result<()> {
+    export_dataset_delimited(record, path, b'\t', "TSV")
+}
+
+pub fn export_dataset_txt(record: &DatasetRecord, path: &Path) -> Result<()> {
+    export_dataset_delimited(record, path, b'\t', "TXT")
+}
+
+fn export_dataset_delimited(
+    record: &DatasetRecord,
+    path: &Path,
+    delimiter: u8,
+    format_label: &str,
+) -> Result<()> {
     let file = fs::File::create(path)
-        .with_context(|| format!("无法创建 CSV: {}", path.display()))?;
+        .with_context(|| format!("无法创建 {format_label}: {}", path.display()))?;
     let mut writer = BufWriter::new(file);
 
     writer.write_all(b"\xEF\xBB\xBF")?;
 
-    let mut csv_writer = csv::WriterBuilder::new().from_writer(writer);
+    let mut csv_writer = csv::WriterBuilder::new()
+        .delimiter(delimiter)
+        .from_writer(writer);
     csv_writer.write_record(record.working_table.column_names())?;
 
     for row_index in 0..record.working_table.height() {
@@ -27,32 +46,6 @@ pub fn export_dataset_csv(record: &DatasetRecord, path: &Path) -> Result<()> {
     }
 
     csv_writer.flush()?;
-    Ok(())
-}
-
-pub fn export_dataset_json(record: &DatasetRecord, path: &Path) -> Result<()> {
-    let headers = record.working_table.column_names();
-    let rows = (0..record.working_table.height())
-        .map(|row_index| {
-            headers
-                .iter()
-                .cloned()
-                .zip(record.working_table.row(row_index))
-                .map(|(key, value)| {
-                    (
-                        key,
-                        value
-                            .map(serde_json::Value::String)
-                            .unwrap_or(serde_json::Value::Null),
-                    )
-                })
-                .collect::<serde_json::Map<String, serde_json::Value>>()
-        })
-        .map(serde_json::Value::Object)
-        .collect::<Vec<_>>();
-
-    let content = serde_json::to_string_pretty(&rows)?;
-    fs::write(path, content).with_context(|| format!("无法写入 JSON: {}", path.display()))?;
     Ok(())
 }
 

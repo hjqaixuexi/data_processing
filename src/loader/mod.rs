@@ -6,8 +6,6 @@ use anyhow::{Context, Result, bail};
 use calamine::{Data, Reader, Xlsx, open_workbook};
 use chrono::Local;
 use encoding_rs::GBK;
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -23,8 +21,9 @@ pub fn load_paths(paths: &[PathBuf]) -> Result<Vec<LoadedDataset>> {
         let started_at = Instant::now();
 
         let mut loaded = match format {
-            FileFormat::Csv => vec![load_csv(path, metadata.len())?],
-            FileFormat::Json => vec![load_json(path, metadata.len())?],
+            FileFormat::Csv | FileFormat::Tsv | FileFormat::Txt => {
+                vec![load_delimited(path, metadata.len(), format.clone())?]
+            }
             FileFormat::Xlsx => load_xlsx(path, metadata.len())?,
         };
         let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -41,10 +40,10 @@ pub fn load_paths(paths: &[PathBuf]) -> Result<Vec<LoadedDataset>> {
     Ok(datasets)
 }
 
-fn load_csv(path: &Path, size_bytes: u64) -> Result<LoadedDataset> {
-    let bytes = fs::read(path).with_context(|| format!("无法读取 CSV 文件: {}", path.display()))?;
+fn load_delimited(path: &Path, size_bytes: u64, format: FileFormat) -> Result<LoadedDataset> {
+    let bytes = fs::read(path).with_context(|| format!("无法读取文本表格文件: {}", path.display()))?;
     let content = decode_text_bytes(&bytes);
-    let delimiter = guess_delimiter(&content);
+    let delimiter = delimiter_for_format(&format, &content);
 
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(delimiter)
@@ -78,58 +77,14 @@ fn load_csv(path: &Path, size_bytes: u64) -> Result<LoadedDataset> {
     let table = build_table(headers, rows);
 
     Ok(LoadedDataset {
-        dataset_name: path_stem_or_default(path, "csv_dataset"),
+        dataset_name: path_stem_or_default(path, "text_dataset"),
         source_path: path.to_path_buf(),
-        format: FileFormat::Csv,
+        format,
         size_bytes,
         imported_at: Local::now(),
         import_duration_ms: None,
         sheet_name: None,
         table,
-    })
-}
-
-fn load_json(path: &Path, size_bytes: u64) -> Result<LoadedDataset> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("无法读取 JSON 文件: {}", path.display()))?;
-    let json: Value = serde_json::from_str(&content).context("JSON 解析失败")?;
-
-    let records = match json {
-        Value::Array(items) => items,
-        Value::Object(_) => vec![json],
-        _ => bail!("JSON 根节点必须是对象或对象数组"),
-    };
-
-    let mut all_keys = BTreeSet::new();
-    let mut flattened_rows = Vec::new();
-
-    for item in records {
-        let mut flattened = BTreeMap::new();
-        flatten_json("", &item, &mut flattened);
-        all_keys.extend(flattened.keys().cloned());
-        flattened_rows.push(flattened);
-    }
-
-    let headers = all_keys.into_iter().collect::<Vec<_>>();
-    let rows = flattened_rows
-        .into_iter()
-        .map(|row| {
-            headers
-                .iter()
-                .map(|header| row.get(header).cloned().unwrap_or(None))
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-
-    Ok(LoadedDataset {
-        dataset_name: path_stem_or_default(path, "json_dataset"),
-        source_path: path.to_path_buf(),
-        format: FileFormat::Json,
-        size_bytes,
-        imported_at: Local::now(),
-        import_duration_ms: None,
-        sheet_name: None,
-        table: build_table(headers, rows),
     })
 }
 
@@ -269,49 +224,11 @@ fn guess_delimiter(content: &str) -> u8 {
         .unwrap_or(b',')
 }
 
-fn flatten_json(prefix: &str, value: &Value, out: &mut BTreeMap<String, Option<String>>) {
-    match value {
-        Value::Object(map) => {
-            for (key, value) in map {
-                let next = if prefix.is_empty() {
-                    key.to_string()
-                } else {
-                    format!("{prefix}.{key}")
-                };
-                flatten_json(&next, value, out);
-            }
-        }
-        Value::Array(values) => {
-            if values.iter().all(|item| !item.is_object() && !item.is_array()) {
-                let joined = values
-                    .iter()
-                    .filter_map(simple_json_value)
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                out.insert(prefix.to_string(), Some(joined));
-            } else {
-                out.insert(prefix.to_string(), Some(value.to_string()));
-            }
-        }
-        _ => {
-            out.insert(prefix.to_string(), simple_json_value(value));
-        }
-    }
-}
-
-fn simple_json_value(value: &Value) -> Option<String> {
-    match value {
-        Value::Null => None,
-        Value::Bool(flag) => Some(flag.to_string()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::String(text) => {
-            if null_marked(text) {
-                None
-            } else {
-                Some(text.trim().to_string())
-            }
-        }
-        _ => Some(value.to_string()),
+fn delimiter_for_format(format: &FileFormat, content: &str) -> u8 {
+    match format {
+        FileFormat::Tsv => b'\t',
+        FileFormat::Txt => guess_delimiter(content),
+        _ => guess_delimiter(content),
     }
 }
 

@@ -9,7 +9,8 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FileFormat {
     Csv,
-    Json,
+    Tsv,
+    Txt,
     Xlsx,
 }
 
@@ -22,16 +23,18 @@ impl FileFormat {
             .as_deref()
         {
             Some("csv") => Ok(Self::Csv),
-            Some("json") => Ok(Self::Json),
+            Some("tsv") => Ok(Self::Tsv),
+            Some("txt") => Ok(Self::Txt),
             Some("xlsx") => Ok(Self::Xlsx),
-            _ => bail!("仅支持 csv / json / xlsx 文件"),
+            _ => bail!("仅支持 csv / tsv / txt / xlsx 文件"),
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Csv => "CSV",
-            Self::Json => "JSON",
+            Self::Tsv => "TSV",
+            Self::Txt => "TXT",
             Self::Xlsx => "XLSX",
         }
     }

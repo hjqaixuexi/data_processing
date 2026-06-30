@@ -375,8 +375,13 @@ export component MainWindow inherits Window {
             }
 
             MenuItem {
-                title: "导出 JSON";
-                activated => { Logic.export-json(); }
+                title: "导出 TSV";
+                activated => { Logic.export-tsv(); }
+            }
+
+            MenuItem {
+                title: "导出 TXT";
+                activated => { Logic.export-txt(); }
             }
 
             MenuItem {
