@@ -4,9 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [profile.release]
-opt-level = 3 # 优化等级，0-3，s，z
-lto = true # 启用链接时优化
+opt-level = 3     # 优化等级，0-3，s，z
+lto = true        # 启用链接时优化
 codegen-units = 8 # 减少代码生成单元以提高优化效果
+panic = "abort"   # 不展开栈回溯，减小体积
+strip = true      # 去除符号表和调试信息
+
+# [profile.release]
+# opt-level = "z"    # 有性能损失,优化目标：最小代码体积
+# lto = true         # 启用链接时优化（LTO）
+# codegen-units = 1  # 减少代码生成单元数量，提高优化效果
+# panic = "abort"        # 不展开栈回溯，减小体积
+# strip = true     # 去除符号表和调试信息
+
 
 [dependencies]
 slint = "1.17.0"

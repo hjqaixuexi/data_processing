@@ -493,37 +493,38 @@ export component MainWindow inherits Window {
                         spacing: 4px;
 
                         TabButton {
-                            label: "预览";
+                            label: "数据预览与台账";
                             selected: root.active-tab == 0;
                             pressed => { root.active-tab = 0; }
                         }
 
                         TabButton {
-                            label: "质量";
+                            label: "数据质量检查";
+                            
                             selected: root.active-tab == 1;
                             pressed => { root.active-tab = 1; }
                         }
 
                         TabButton {
-                            label: "清洗";
+                            label: "数据清洗处理";
                             selected: root.active-tab == 2;
                             pressed => { root.active-tab = 2; }
                         }
 
                         TabButton {
-                            label: "派生";
+                            label: "字段派生与排序";
                             selected: root.active-tab == 3;
                             pressed => { root.active-tab = 3; }
                         }
 
                         TabButton {
-                            label: "融合";
+                            label: "多表关联融合";
                             selected: root.active-tab == 4;
                             pressed => { root.active-tab = 4; }
                         }
 
                         TabButton {
-                            label: "流程";
+                            label: "处理流程记录";
                             selected: root.active-tab == 5;
                             pressed => { root.active-tab = 5; }
                         }
