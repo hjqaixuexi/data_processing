@@ -281,6 +281,7 @@ pub fn execute(
         .iter()
         .map(build_column_alignment_profile)
         .collect::<Vec<_>>();
+    let primary_source_confidence = source_confidence(primary, compute_missing_ratio(primary.table));
 
     let mut secondary_prepared = Vec::new();
     let mut skipped_sources = Vec::new();
@@ -328,10 +329,12 @@ pub fn execute(
 
     for primary_row in &primary_prepared {
         let mut row = primary_row.cells.clone();
-        let mut primary_weights = row
-            .iter()
-            .map(|value| if is_non_empty(value.as_deref()) { 1.0 } else { 0.0 })
-            .collect::<Vec<_>>();
+        let mut primary_weights = build_primary_weights(
+            primary_row,
+            &primary_profiles,
+            primary_source_confidence,
+            request.confidence_alignment,
+        );
         let mut raw_secondary_cells = Vec::new();
         let mut matched_source_count = 0usize;
         let mut trace_parts = Vec::new();
@@ -367,13 +370,17 @@ pub fn execute(
                         request.confidence_alignment,
                     );
                     if let Some(primary_index) = binding.overlaps_primary {
-                        apply_fusion_strategy(
+                        let confidence_override = apply_fusion_strategy(
                             &mut row[primary_index],
                             &cell,
                             &mut primary_weights[primary_index],
                             candidate_weight,
                             &request.fusion_strategy,
+                            request.confidence_alignment,
                         );
+                        if confidence_override {
+                            corrections.insert("低置信字段纠偏".to_string());
+                        }
                     } else {
                         raw_secondary_cells.push(cell);
                     }
@@ -1032,6 +1039,72 @@ fn aligned_binding_confidence(
         .clamp(0.1, 1.25)
 }
 
+fn build_primary_weights(
+    row: &PreparedRow,
+    primary_profiles: &[ColumnAlignmentProfile],
+    primary_source_confidence: f64,
+    confidence_alignment: bool,
+) -> Vec<f64> {
+    row.cells
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| {
+            let modality = primary_profiles
+                .get(index)
+                .map(|profile| profile.modality)
+                .unwrap_or(AlignmentModality::Text);
+            primary_cell_confidence(
+                cell,
+                modality,
+                row.anomaly_cells,
+                row.timestamp.is_some(),
+                primary_source_confidence,
+                confidence_alignment,
+            )
+        })
+        .collect()
+}
+
+fn primary_cell_confidence(
+    cell: &Option<String>,
+    modality: AlignmentModality,
+    anomaly_cells: usize,
+    has_timestamp: bool,
+    source_confidence: f64,
+    confidence_alignment: bool,
+) -> f64 {
+    if !is_non_empty(cell.as_deref()) {
+        return 0.0;
+    }
+    if !confidence_alignment {
+        return 1.0;
+    }
+
+    let value_quality = value_quality_score(cell, modality);
+    let anomaly_factor = (1.0 - anomaly_cells as f64 * 0.08).clamp(0.55, 1.0);
+    let time_factor = if has_timestamp { 1.0 } else { 0.85 };
+    (source_confidence * 0.55 + value_quality * 0.25 + anomaly_factor * 0.1 + time_factor * 0.1)
+        .clamp(0.18, 1.1)
+}
+
+fn value_quality_score(cell: &Option<String>, modality: AlignmentModality) -> f64 {
+    match cell.as_ref() {
+        Some(value) if !value.trim().is_empty() => match modality {
+            AlignmentModality::Continuous => parse_numeric(value).map(|_| 1.0).unwrap_or(0.5),
+            AlignmentModality::State => 0.92,
+            AlignmentModality::Event => 0.88,
+            AlignmentModality::Text => 0.85,
+        },
+        _ => 0.35,
+    }
+}
+
+fn should_override_by_confidence(current_weight: f64, candidate_weight: f64) -> bool {
+    candidate_weight >= current_weight + 0.14
+        && candidate_weight >= current_weight * 1.18
+        && current_weight <= 0.9
+}
+
 fn time_alignment_score(distance: i64, window_seconds: i64) -> f64 {
     let window = window_seconds.max(1) as f64;
     (1.0 - (distance as f64 / window).min(1.0)).clamp(0.0, 1.0)
@@ -1180,9 +1253,10 @@ fn apply_fusion_strategy(
     current_weight: &mut f64,
     candidate_weight: f64,
     strategy: &FusionStrategy,
-) {
+    confidence_alignment: bool,
+) -> bool {
     if !is_non_empty(candidate.as_deref()) {
-        return;
+        return false;
     }
 
     match strategy {
@@ -1190,6 +1264,10 @@ fn apply_fusion_strategy(
             if !is_non_empty(current.as_deref()) {
                 *current = candidate.clone();
                 *current_weight = candidate_weight;
+            } else if confidence_alignment && should_override_by_confidence(*current_weight, candidate_weight) {
+                *current = candidate.clone();
+                *current_weight = candidate_weight;
+                return true;
             }
         }
         FusionStrategy::SecondaryFirst => {
@@ -1212,38 +1290,50 @@ fn apply_fusion_strategy(
             if !is_non_empty(current.as_deref()) {
                 *current = candidate.clone();
                 *current_weight = candidate_weight;
-                return;
+                return false;
             }
             let Some(current_numeric) = current.as_ref().and_then(|value| parse_numeric(value)) else {
-                *current = candidate.clone();
-                *current_weight = candidate_weight;
-                return;
+                let should_replace = !confidence_alignment || candidate_weight > *current_weight;
+                if should_replace {
+                    *current = candidate.clone();
+                    *current_weight = candidate_weight;
+                }
+                return confidence_alignment && should_replace;
             };
             let Some(candidate_numeric) = candidate.as_ref().and_then(|value| parse_numeric(value)) else {
-                return;
+                return false;
             };
-            *current = Some(format_number((current_numeric + candidate_numeric) / 2.0));
-            *current_weight = (*current_weight).max(candidate_weight);
+            if confidence_alignment {
+                let total_weight = (*current_weight + candidate_weight).max(f64::EPSILON);
+                let fused = (current_numeric * *current_weight + candidate_numeric * candidate_weight) / total_weight;
+                *current = Some(format_number(fused));
+                *current_weight = total_weight;
+            } else {
+                *current = Some(format_number((current_numeric + candidate_numeric) / 2.0));
+                *current_weight = (*current_weight).max(candidate_weight);
+            }
         }
         FusionStrategy::ConfidenceWeighted => {
             if !is_non_empty(current.as_deref()) {
                 *current = candidate.clone();
                 *current_weight = candidate_weight;
-                return;
+                return false;
             }
             let Some(current_numeric) = current.as_ref().and_then(|value| parse_numeric(value)) else {
                 if candidate_weight > *current_weight {
                     *current = candidate.clone();
                     *current_weight = candidate_weight;
+                    return confidence_alignment;
                 }
-                return;
+                return false;
             };
             let Some(candidate_numeric) = candidate.as_ref().and_then(|value| parse_numeric(value)) else {
                 if candidate_weight > *current_weight {
                     *current = candidate.clone();
                     *current_weight = candidate_weight;
+                    return confidence_alignment;
                 }
-                return;
+                return false;
             };
             let total_weight = (*current_weight + candidate_weight).max(f64::EPSILON);
             let fused = (current_numeric * *current_weight + candidate_numeric * candidate_weight) / total_weight;
@@ -1251,6 +1341,7 @@ fn apply_fusion_strategy(
             *current_weight = total_weight;
         }
     }
+    false
 }
 
 fn apply_missing_strategy(
