@@ -134,38 +134,40 @@ enum AlignmentModality {
     Text,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SemanticUnit {
+    TemperatureC,
+    TemperatureF,
+    TemperatureK,
+    PressurePa,
+    PressureKpa,
+    PressureMpa,
+    PressureBar,
+    FlowLpm,
+    FlowM3h,
+    FlowM3s,
+    VibrationMmS,
+    VibrationUmS,
+    CurrentMa,
+    CurrentA,
+    VoltageMv,
+    VoltageV,
+    PowerW,
+    PowerKw,
+    EnergyWh,
+    EnergyKwh,
+    FrequencyHz,
+    FrequencyKhz,
+    SpeedRpm,
+    SpeedRps,
+    Percentage,
+}
+
 #[derive(Clone, Debug)]
 struct ColumnAlignmentProfile {
     canonical_name: String,
     modality: AlignmentModality,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct SemanticAlignmentQuery {
-    pub primary_name: String,
-    pub secondary_name: String,
-    pub primary_samples: Vec<String>,
-    pub secondary_samples: Vec<String>,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct SemanticAlignmentDecision {
-    pub accepted: bool,
-    pub semantic_score: f64,
-    pub canonical_name: Option<String>,
-    pub note: Option<String>,
-}
-
-#[allow(dead_code)]
-pub trait AlignmentModelAdapter {
-    fn arbitrate_semantic_match(
-        &self,
-        _query: &SemanticAlignmentQuery,
-    ) -> Option<SemanticAlignmentDecision> {
-        None
-    }
+    unit: Option<SemanticUnit>,
 }
 
 #[derive(Clone, Debug)]
@@ -210,7 +212,10 @@ struct OutputBinding {
     overlaps_primary: Option<usize>,
     semantic_score: f64,
     modality_score: f64,
+    unit_score: f64,
     secondary_modality: AlignmentModality,
+    primary_unit: Option<SemanticUnit>,
+    secondary_unit: Option<SemanticUnit>,
 }
 
 #[derive(Clone, Debug)]
@@ -222,6 +227,7 @@ struct PreparedSource {
     confidence: f64,
     semantic_score: f64,
     modality_score: f64,
+    unit_score: f64,
     deduplicated_rows: usize,
 }
 
@@ -243,6 +249,21 @@ struct FusionAnchorRow {
     trace_parts: Vec<String>,
     corrections: BTreeSet<String>,
     quality_score: f64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CellTransform {
+    cell: Option<String>,
+    unit_converted: bool,
+    modal_normalized: bool,
+}
+
+#[derive(Clone, Debug)]
+struct OverlapCandidate {
+    cell: Option<String>,
+    weight: f64,
+    unit_converted: bool,
+    modal_normalized: bool,
 }
 
 pub fn execute(
@@ -290,6 +311,7 @@ pub fn execute(
             *source,
             &object_keys,
             &time_column,
+            primary.table.columns.as_slice(),
             &primary_profiles,
             &primary_name_map,
             request,
@@ -314,6 +336,7 @@ pub fn execute(
         .sum::<usize>();
     let average_semantic_score = average_source_metric(&secondary_prepared, |source| source.semantic_score);
     let average_modality_score = average_source_metric(&secondary_prepared, |source| source.modality_score);
+    let average_unit_score = average_source_metric(&secondary_prepared, |source| source.unit_score);
     let average_confidence_score = average_source_metric(&secondary_prepared, |source| source.confidence);
     let (headers, logical_types) = build_output_schema(primary.table, &mut secondary_prepared);
     let data_width = headers.len();
@@ -322,6 +345,7 @@ pub fn execute(
     let mut anchor_rows = Vec::with_capacity(primary_prepared.len());
     let mut matched_rows = 0usize;
     let mut total_quality = 0.0;
+    let mut total_row_confidence = 0.0;
     let mut total_time_distance = 0i64;
     let mut time_distance_count = 0usize;
     let mut total_missing_fields = 0usize;
@@ -336,6 +360,8 @@ pub fn execute(
             request.confidence_alignment,
         );
         let mut raw_secondary_cells = Vec::new();
+        let mut raw_secondary_weights = Vec::new();
+        let mut overlap_candidates = BTreeMap::<usize, Vec<OverlapCandidate>>::new();
         let mut matched_source_count = 0usize;
         let mut trace_parts = Vec::new();
         let mut corrections = BTreeSet::new();
@@ -358,31 +384,37 @@ pub fn execute(
 
                 for binding in &source.bindings {
                     let cell = found.cells.get(binding.source_index).cloned().unwrap_or(None);
-                    if cell.is_none() {
+                    let transformed = transform_binding_cell(binding, &cell);
+                    if transformed.cell.is_none() {
                         missing_fields += 1;
                     }
                     let candidate_weight = aligned_binding_confidence(
                         source,
                         binding,
-                        &cell,
+                        &transformed.cell,
                         found.confidence_weight,
                         found.time_score,
                         request.confidence_alignment,
                     );
+                    if transformed.unit_converted {
+                        corrections.insert("单位换算".to_string());
+                    }
+                    if transformed.modal_normalized {
+                        corrections.insert("状态归一".to_string());
+                    }
                     if let Some(primary_index) = binding.overlaps_primary {
-                        let confidence_override = apply_fusion_strategy(
-                            &mut row[primary_index],
-                            &cell,
-                            &mut primary_weights[primary_index],
-                            candidate_weight,
-                            &request.fusion_strategy,
-                            request.confidence_alignment,
-                        );
-                        if confidence_override {
-                            corrections.insert("低置信字段纠偏".to_string());
-                        }
+                        overlap_candidates
+                            .entry(primary_index)
+                            .or_default()
+                            .push(OverlapCandidate {
+                                cell: transformed.cell,
+                                weight: candidate_weight,
+                                unit_converted: transformed.unit_converted,
+                                modal_normalized: transformed.modal_normalized,
+                            });
                     } else {
-                        raw_secondary_cells.push(cell);
+                        raw_secondary_cells.push(transformed.cell);
+                        raw_secondary_weights.push(candidate_weight);
                     }
                 }
             } else {
@@ -394,7 +426,44 @@ pub fn execute(
                         .filter(|binding| binding.overlaps_primary.is_none())
                         .map(|_| None),
                 );
+                raw_secondary_weights.extend(
+                    source
+                        .bindings
+                        .iter()
+                        .filter(|binding| binding.overlaps_primary.is_none())
+                        .map(|_| 0.0),
+                );
                 trace_parts.push(format!("{}: 未命中", source.trace_label));
+            }
+        }
+
+        for (primary_index, candidates) in overlap_candidates.iter_mut() {
+            if request.confidence_alignment && !matches!(request.fusion_strategy, FusionStrategy::SecondaryFirst) {
+                candidates.sort_by(|left, right| {
+                    right
+                        .weight
+                        .partial_cmp(&left.weight)
+                        .unwrap_or(Ordering::Equal)
+                });
+            }
+            for candidate in candidates.iter() {
+                let confidence_override = apply_fusion_strategy(
+                    &mut row[*primary_index],
+                    &candidate.cell,
+                    &mut primary_weights[*primary_index],
+                    candidate.weight,
+                    &request.fusion_strategy,
+                    request.confidence_alignment,
+                );
+                if confidence_override {
+                    corrections.insert("低置信字段纠偏".to_string());
+                }
+                if candidate.unit_converted {
+                    corrections.insert("单位换算".to_string());
+                }
+                if candidate.modal_normalized {
+                    corrections.insert("状态归一".to_string());
+                }
             }
         }
 
@@ -402,6 +471,7 @@ pub fn execute(
             matched_rows += 1;
         }
 
+        let row_confidence = compute_row_confidence(&primary_weights, &raw_secondary_weights);
         let quality_score = if request.score_quality {
             compute_quality_score(
                 matched_source_count,
@@ -409,12 +479,15 @@ pub fn execute(
                 quality_field_count,
                 missing_fields,
                 anomaly_cells,
+                corrections.len(),
+                row_confidence,
                 &trace_parts,
             )
         } else {
             100.0
         };
         total_quality += quality_score;
+        total_row_confidence += row_confidence;
         total_missing_fields += missing_fields;
         total_anomaly_cells += anomaly_cells;
 
@@ -472,6 +545,11 @@ pub fn execute(
     } else {
         total_quality / anchor_rows.len() as f64
     };
+    let average_row_confidence = if anchor_rows.is_empty() {
+        0.0
+    } else {
+        total_row_confidence / anchor_rows.len() as f64
+    };
     let average_time_distance = if time_distance_count == 0 {
         0.0
     } else {
@@ -505,19 +583,22 @@ pub fn execute(
             average_time_distance
         ),
         quality_summary: format!(
-            "{} | 去重 {} 行 | 异常剔除 {} 个单元 | 缺失填补 {} | 平均质量分 {:.1} | 置信度 {:.2}",
+            "{} | 去重 {} 行 | 异常剔除 {} 个单元 | 缺失填补 {} | 平均质量分 {:.1} | 源置信度 {:.2} | 行置信度 {:.2} | 单位对齐 {:.2}",
             if request.score_quality { "已启用质量评分" } else { "质量评分关闭" },
             secondary_prepared.iter().map(|source| source.deduplicated_rows).sum::<usize>(),
             total_anomaly_cells,
             request.missing_strategy.as_str(),
             average_quality_score,
-            average_confidence_score
+            average_confidence_score,
+            average_row_confidence,
+            average_unit_score
         ),
         output_summary,
         trace_summary: format!(
-            "保留 3 个追踪字段；语义对齐 {:.2}；模态对齐 {:.2}；辅源平均缺失补位 {:.1} 个字段；未映射辅源 {} 个",
+            "保留 3 个追踪字段；语义对齐 {:.2}；模态对齐 {:.2}；单位对齐 {:.2}；辅源平均缺失补位 {:.1} 个字段；未映射辅源 {} 个",
             average_semantic_score,
             average_modality_score,
+            average_unit_score,
             if primary_prepared.is_empty() {
                 0.0
             } else {
@@ -571,6 +652,7 @@ fn prepare_secondary_source(
     source: SourceBundle<'_>,
     primary_object_keys: &[String],
     primary_time_column: &str,
+    primary_columns: &[TableColumn],
     primary_profiles: &[ColumnAlignmentProfile],
     primary_name_map: &HashMap<String, usize>,
     request: &FusionRequest,
@@ -611,6 +693,7 @@ fn prepare_secondary_source(
         source,
         &mapped_object_keys,
         &time_column,
+        primary_columns,
         primary_profiles,
         primary_name_map,
         request,
@@ -623,6 +706,7 @@ fn prepare_secondary_source(
     let raw_confidence = source_confidence(source, missing_ratio);
     let semantic_score = average_binding_metric(&bindings, |binding| binding.semantic_score);
     let modality_score = average_binding_metric(&bindings, |binding| binding.modality_score);
+    let unit_score = average_binding_metric(&bindings, |binding| binding.unit_score);
     Ok(PreparedSource {
         dataset_name: source.dataset_name.to_string(),
         trace_label: String::new(),
@@ -632,10 +716,12 @@ fn prepare_secondary_source(
             raw_confidence,
             semantic_score,
             modality_score,
+            unit_score,
             request.confidence_alignment,
         ),
         semantic_score,
         modality_score,
+        unit_score,
         deduplicated_rows,
     })
 }
@@ -745,6 +831,7 @@ fn build_output_bindings(
     source: SourceBundle<'_>,
     object_keys: &[String],
     time_column: &str,
+    primary_columns: &[TableColumn],
     primary_profiles: &[ColumnAlignmentProfile],
     primary_name_map: &HashMap<String, usize>,
     request: &FusionRequest,
@@ -763,7 +850,7 @@ fn build_output_bindings(
                 return None;
             }
             let secondary_profile = build_column_alignment_profile(column);
-            let (overlaps_primary, semantic_score, modality_score) = resolve_primary_overlap(
+            let (overlaps_primary, semantic_score, modality_score, unit_score) = resolve_primary_overlap(
                 &normalized,
                 &secondary_profile,
                 primary_profiles,
@@ -771,87 +858,81 @@ fn build_output_bindings(
                 request.semantic_alignment,
                 request.modality_alignment,
             );
+            let primary_unit = overlaps_primary
+                .and_then(|index| primary_profiles.get(index))
+                .and_then(|profile| profile.unit);
             Some(OutputBinding {
                 source_index: index,
-                output_name: column.name.clone(),
+                output_name: if let Some(primary_index) = overlaps_primary {
+                    primary_columns
+                        .get(primary_index)
+                        .map(|primary| primary.name.clone())
+                        .unwrap_or_else(|| column.name.clone())
+                } else {
+                    column.name.clone()
+                },
                 logical_type: column.logical_type.clone(),
                 overlaps_primary,
                 semantic_score,
                 modality_score,
+                unit_score,
                 secondary_modality: secondary_profile.modality,
+                primary_unit,
+                secondary_unit: secondary_profile.unit,
             })
         })
         .collect()
 }
 
 fn build_column_alignment_profile(column: &TableColumn) -> ColumnAlignmentProfile {
+    let canonical_name = canonical_semantic_name(&column.name);
     ColumnAlignmentProfile {
-        canonical_name: canonical_semantic_name(&column.name),
+        canonical_name: canonical_name.clone(),
         modality: classify_column_modality(column),
+        unit: detect_semantic_unit(&column.name, &canonical_name),
     }
 }
 
 fn canonical_semantic_name(value: &str) -> String {
     let normalized = normalize_name(value);
-    if normalized.contains("temperature") || normalized == "temp" || value.contains("温度") {
-        "temperature".to_string()
-    } else if normalized.contains("pressure") || normalized == "press" || value.contains("压力") {
-        "pressure".to_string()
-    } else if normalized.contains("vibration") || normalized == "vib" || value.contains("振动") {
-        "vibration".to_string()
-    } else if normalized.contains("flowrate") || normalized == "flow" || value.contains("流量") {
-        "flow_rate".to_string()
-    } else if normalized.contains("timestamp")
-        || normalized == "time"
-        || normalized == "datetime"
-        || value.contains("时间")
-    {
-        "timestamp".to_string()
-    } else if normalized.contains("deviceid")
-        || normalized == "device"
-        || normalized == "channelid"
-        || normalized == "pointid"
-        || value.contains("设备")
-    {
-        "device_id".to_string()
-    } else if normalized.contains("state") || normalized.contains("status") || value.contains("状态") {
-        "state".to_string()
-    } else if normalized.contains("command") || normalized.contains("control") || value.contains("指令") {
-        "command".to_string()
-    } else if normalized.contains("alarm") || value.contains("告警") {
-        "alarm".to_string()
-    } else {
+    for (canonical, aliases) in semantic_alias_groups() {
+        if aliases.iter().any(|alias| normalized.contains(alias))
+            || aliases.iter().any(|alias| value.contains(alias))
+        {
+            return canonical.to_string();
+        }
+    }
+
+    let tokens = semantic_tokens(value);
+    if tokens.is_empty() {
         normalized
+    } else {
+        tokens.into_iter().collect::<Vec<_>>().join("_")
     }
 }
 
 fn classify_column_modality(column: &TableColumn) -> AlignmentModality {
     let normalized = normalize_name(&column.name);
     if matches!(column.logical_type, LogicalType::Integer | LogicalType::Float) {
-        if normalized.contains("state") || normalized.contains("status") || normalized.contains("mode") {
+        if contains_any(&normalized, &["state", "status", "mode", "phase", "flag", "switch"]) {
             AlignmentModality::State
-        } else if normalized.contains("event")
-            || normalized.contains("command")
-            || normalized.contains("alarm")
-            || normalized.contains("action")
-        {
+        } else if contains_any(
+            &normalized,
+            &["event", "command", "alarm", "action", "fault", "trip", "code"],
+        ) {
             AlignmentModality::Event
         } else {
             AlignmentModality::Continuous
         }
-    } else if normalized.contains("state")
-        || normalized.contains("status")
-        || normalized.contains("mode")
-        || normalized.contains("phase")
-        || normalized.contains("flag")
-    {
+    } else if contains_any(
+        &normalized,
+        &["state", "status", "mode", "phase", "flag", "switch", "step"],
+    ) {
         AlignmentModality::State
-    } else if normalized.contains("event")
-        || normalized.contains("command")
-        || normalized.contains("alarm")
-        || normalized.contains("action")
-        || normalized.contains("fault")
-    {
+    } else if contains_any(
+        &normalized,
+        &["event", "command", "alarm", "action", "fault", "trip", "code"],
+    ) {
         AlignmentModality::Event
     } else {
         AlignmentModality::Text
@@ -865,45 +946,62 @@ fn resolve_primary_overlap(
     primary_name_map: &HashMap<String, usize>,
     semantic_alignment: bool,
     modality_alignment: bool,
-) -> (Option<usize>, f64, f64) {
+) -> (Option<usize>, f64, f64, f64) {
     if let Some(index) = primary_name_map.get(secondary_raw_name).copied() {
+        let primary_profile = primary_profiles.get(index);
         let modality_score = modality_compatibility(
-            primary_profiles
-                .get(index)
+            primary_profile
                 .map(|profile| profile.modality)
                 .unwrap_or(AlignmentModality::Text),
             secondary_profile.modality,
         );
-        if !modality_alignment || modality_score > 0.0 {
-            return (Some(index), 1.0, modality_score.max(0.72));
+        let unit_score = unit_compatibility(
+            primary_profile.and_then(|profile| profile.unit),
+            secondary_profile.unit,
+            primary_profile
+                .map(|profile| profile.modality)
+                .unwrap_or(AlignmentModality::Text),
+            secondary_profile.modality,
+        );
+        if (!modality_alignment || modality_score > 0.0) && unit_score > 0.0 {
+            return (Some(index), 1.0, modality_score.max(0.72), unit_score);
         }
     }
 
     if !semantic_alignment {
-        return (None, 0.55, 0.55);
+        return (None, 0.55, 0.55, 0.55);
     }
 
-    let mut best: Option<(usize, f64, f64)> = None;
+    let mut best: Option<(usize, f64, f64, f64)> = None;
     for (index, profile) in primary_profiles.iter().enumerate() {
         let semantic_score = semantic_similarity(&profile.canonical_name, &secondary_profile.canonical_name);
-        if semantic_score < 0.72 {
+        if semantic_score < 0.68 {
             continue;
         }
         let modality_score = modality_compatibility(profile.modality, secondary_profile.modality);
         if modality_alignment && modality_score <= 0.0 {
             continue;
         }
-        let combined = semantic_score * 0.7 + modality_score * 0.3;
+        let unit_score = unit_compatibility(
+            profile.unit,
+            secondary_profile.unit,
+            profile.modality,
+            secondary_profile.modality,
+        );
+        if unit_score <= 0.0 {
+            continue;
+        }
+        let combined = semantic_score * 0.6 + modality_score * 0.25 + unit_score * 0.15;
         match best {
-            Some((_, best_combined, _)) if combined <= best_combined => {}
-            _ => best = Some((index, combined, modality_score)),
+            Some((_, best_combined, _, _)) if combined <= best_combined => {}
+            _ => best = Some((index, combined, modality_score, unit_score)),
         }
     }
 
-    if let Some((index, combined, modality_score)) = best {
-        (Some(index), combined, modality_score)
+    if let Some((index, combined, modality_score, unit_score)) = best {
+        (Some(index), combined, modality_score, unit_score)
     } else {
-        (None, 0.55, 0.55)
+        (None, 0.55, 0.55, 0.55)
     }
 }
 
@@ -911,9 +1009,11 @@ fn semantic_similarity(primary: &str, secondary: &str) -> f64 {
     if primary == secondary {
         1.0
     } else if primary.contains(secondary) || secondary.contains(primary) {
-        0.84
+        0.86
     } else {
-        jaccard_token_similarity(primary, secondary).max(0.0)
+        let token_score = jaccard_token_similarity(primary, secondary);
+        let bigram_score = bigram_similarity(primary, secondary);
+        (token_score * 0.7 + bigram_score * 0.3).max(token_score).clamp(0.0, 1.0)
     }
 }
 
@@ -933,21 +1033,241 @@ fn jaccard_token_similarity(left: &str, right: &str) -> f64 {
 }
 
 fn semantic_tokens(value: &str) -> BTreeSet<String> {
-    split_canonical_name(value)
+    split_semantic_name(value)
         .into_iter()
+        .flat_map(|token| canonicalize_semantic_token(&token))
         .collect()
 }
 
-fn split_canonical_name(value: &str) -> Vec<String> {
-    if value.contains('_') {
-        value
-            .split('_')
-            .filter(|part| !part.trim().is_empty())
-            .map(str::to_string)
-            .collect()
-    } else {
-        vec![value.to_string()]
+fn split_semantic_name(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let chars = value.chars().collect::<Vec<_>>();
+    for (index, ch) in chars.iter().copied().enumerate() {
+        let is_separator = !(ch.is_alphanumeric() || ch == '%');
+        let previous = index.checked_sub(1).and_then(|idx| chars.get(idx)).copied();
+        let next = chars.get(index + 1).copied();
+        let camel_boundary = previous
+            .zip(Some(ch))
+            .zip(next)
+            .is_some_and(|((prev, current_ch), next_ch)| {
+                prev.is_ascii_lowercase()
+                    && current_ch.is_ascii_uppercase()
+                    && next_ch.is_ascii_lowercase()
+            });
+        let digit_boundary = previous.is_some_and(|prev| {
+            (prev.is_ascii_digit() && !ch.is_ascii_digit()) || (!prev.is_ascii_digit() && ch.is_ascii_digit())
+        });
+        if is_separator || camel_boundary || digit_boundary {
+            if !current.trim().is_empty() {
+                tokens.push(current.to_lowercase());
+                current.clear();
+            }
+            if is_separator {
+                continue;
+            }
+        }
+        current.push(ch.to_ascii_lowercase());
     }
+    if !current.trim().is_empty() {
+        tokens.push(current.to_lowercase());
+    }
+    if tokens.is_empty() {
+        vec![normalize_name(value)]
+    } else {
+        tokens
+    }
+}
+
+fn canonicalize_semantic_token(token: &str) -> Vec<String> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    for (canonical, aliases) in semantic_alias_groups() {
+        if aliases.iter().any(|alias| trimmed == *alias) {
+            return canonical
+                .split('_')
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+        }
+    }
+    vec![trimmed.to_string()]
+}
+
+fn semantic_alias_groups() -> &'static [(&'static str, &'static [&'static str])] {
+    &[
+        ("temperature", &["temperature", "temp", "tmp", "温度", "料温", "炉温"]),
+        ("pressure", &["pressure", "press", "prs", "压力", "压强"]),
+        ("vibration", &["vibration", "vib", "振动", "震动"]),
+        ("flow_rate", &["flowrate", "flow", "flux", "rate", "流量", "流速"]),
+        ("timestamp", &["timestamp", "datetime", "time", "ts", "时间", "时刻", "采样时间"]),
+        ("device_id", &["deviceid", "device", "equipment", "equipid", "channelid", "pointid", "设备", "装置", "点位"]),
+        ("state", &["state", "status", "mode", "phase", "flag", "状态", "工况"]),
+        ("command", &["command", "control", "cmd", "setpoint", "instruction", "指令", "控制", "设定"]),
+        ("alarm", &["alarm", "alert", "warn", "fault", "trip", "告警", "报警", "故障"]),
+        ("current", &["current", "amp", "amps", "电流"]),
+        ("voltage", &["voltage", "volt", "电压"]),
+        ("power", &["power", "kw", "watt", "功率"]),
+        ("energy", &["energy", "kwh", "wh", "电量", "能耗", "能量"]),
+        ("frequency", &["frequency", "freq", "hz", "频率"]),
+        ("speed", &["speed", "rpm", "velocity", "转速", "速度"]),
+        ("humidity", &["humidity", "humid", "湿度"]),
+        ("level", &["level", "liquidlevel", "液位", "料位"]),
+        ("position", &["position", "pos", "loc", "位置"]),
+        ("opening", &["opening", "openratio", "开度"]),
+        ("concentration", &["concentration", "conc", "浓度"]),
+        ("count", &["count", "qty", "num", "数量", "计数"]),
+        ("batch_id", &["batch", "lot", "批次"]),
+        ("order_id", &["order", "工单", "订单"]),
+        ("product_id", &["product", "material", "产品", "物料"]),
+        ("operator_id", &["operator", "worker", "操作员"]),
+    ]
+}
+
+fn detect_semantic_unit(value: &str, canonical_name: &str) -> Option<SemanticUnit> {
+    let normalized = normalize_name(value);
+    if canonical_name.contains("temperature")
+        && (contains_any(&normalized, &["degc", "celsius", "tempc", "℃"]) || value.contains('℃'))
+    {
+        Some(SemanticUnit::TemperatureC)
+    } else if canonical_name.contains("temperature")
+        && contains_any(&normalized, &["degf", "fahrenheit", "tempf", "华氏"])
+    {
+        Some(SemanticUnit::TemperatureF)
+    } else if canonical_name.contains("temperature")
+        && contains_any(&normalized, &["kelvin", "tempk"])
+    {
+        Some(SemanticUnit::TemperatureK)
+    } else if canonical_name.contains("pressure") && contains_any(&normalized, &["mpa"]) {
+        Some(SemanticUnit::PressureMpa)
+    } else if canonical_name.contains("pressure") && contains_any(&normalized, &["kpa"]) {
+        Some(SemanticUnit::PressureKpa)
+    } else if canonical_name.contains("pressure") && contains_any(&normalized, &["bar"]) {
+        Some(SemanticUnit::PressureBar)
+    } else if canonical_name.contains("pressure") && contains_any(&normalized, &["pressurepa", "unitpa"]) {
+        Some(SemanticUnit::PressurePa)
+    } else if canonical_name.contains("flow") && contains_any(&normalized, &["lpm", "lmin", "lpermin"]) {
+        Some(SemanticUnit::FlowLpm)
+    } else if canonical_name.contains("flow") && contains_any(&normalized, &["m3h", "m3hour"]) {
+        Some(SemanticUnit::FlowM3h)
+    } else if canonical_name.contains("flow") && contains_any(&normalized, &["m3s", "m3sec"]) {
+        Some(SemanticUnit::FlowM3s)
+    } else if canonical_name.contains("vibration") && contains_any(&normalized, &["mms", "mms2", "mmsrms"]) {
+        Some(SemanticUnit::VibrationMmS)
+    } else if canonical_name.contains("vibration") && contains_any(&normalized, &["ums", "ums2"]) {
+        Some(SemanticUnit::VibrationUmS)
+    } else if canonical_name.contains("current") && contains_any(&normalized, &["ma"]) {
+        Some(SemanticUnit::CurrentMa)
+    } else if canonical_name.contains("current")
+        && contains_any(&normalized, &["current", "amp", "amps", "ampere"])
+        && !contains_any(&normalized, &["alarm"])
+    {
+        Some(SemanticUnit::CurrentA)
+    } else if canonical_name.contains("voltage") && contains_any(&normalized, &["mv"]) {
+        Some(SemanticUnit::VoltageMv)
+    } else if canonical_name.contains("voltage") && contains_any(&normalized, &["voltage", "volt"]) {
+        Some(SemanticUnit::VoltageV)
+    } else if canonical_name.contains("power") && contains_any(&normalized, &["kw"]) {
+        Some(SemanticUnit::PowerKw)
+    } else if canonical_name.contains("power") && contains_any(&normalized, &["watt", "power"]) {
+        Some(SemanticUnit::PowerW)
+    } else if canonical_name.contains("energy") && contains_any(&normalized, &["kwh"]) {
+        Some(SemanticUnit::EnergyKwh)
+    } else if canonical_name.contains("energy") && contains_any(&normalized, &["energy"]) {
+        Some(SemanticUnit::EnergyWh)
+    } else if canonical_name.contains("frequency") && contains_any(&normalized, &["khz"]) {
+        Some(SemanticUnit::FrequencyKhz)
+    } else if canonical_name.contains("frequency") && contains_any(&normalized, &["freq", "frequency", "hz"]) {
+        Some(SemanticUnit::FrequencyHz)
+    } else if canonical_name.contains("speed") && contains_any(&normalized, &["rps"]) {
+        Some(SemanticUnit::SpeedRps)
+    } else if canonical_name.contains("speed") && contains_any(&normalized, &["rpm", "speed"]) {
+        Some(SemanticUnit::SpeedRpm)
+    } else if (canonical_name.contains("humidity")
+        || canonical_name.contains("level")
+        || canonical_name.contains("opening")
+        || canonical_name.contains("percentage"))
+        && (contains_any(&normalized, &["percent", "pct"]) || value.contains('%'))
+    {
+        Some(SemanticUnit::Percentage)
+    } else {
+        None
+    }
+}
+
+fn unit_compatibility(
+    primary: Option<SemanticUnit>,
+    secondary: Option<SemanticUnit>,
+    primary_modality: AlignmentModality,
+    secondary_modality: AlignmentModality,
+) -> f64 {
+    if !matches!(primary_modality, AlignmentModality::Continuous)
+        || !matches!(secondary_modality, AlignmentModality::Continuous)
+    {
+        return 1.0;
+    }
+    match (primary, secondary) {
+        (None, None) => 0.72,
+        (Some(_), None) | (None, Some(_)) => 0.82,
+        (Some(left), Some(right)) if left == right => 1.0,
+        (Some(left), Some(right)) if can_convert_unit(left, right) => 0.94,
+        _ => 0.0,
+    }
+}
+
+fn can_convert_unit(primary: SemanticUnit, secondary: SemanticUnit) -> bool {
+    measurement_domain(primary) == measurement_domain(secondary)
+}
+
+fn measurement_domain(unit: SemanticUnit) -> &'static str {
+    match unit {
+        SemanticUnit::TemperatureC | SemanticUnit::TemperatureF | SemanticUnit::TemperatureK => "temperature",
+        SemanticUnit::PressurePa
+        | SemanticUnit::PressureKpa
+        | SemanticUnit::PressureMpa
+        | SemanticUnit::PressureBar => "pressure",
+        SemanticUnit::FlowLpm | SemanticUnit::FlowM3h | SemanticUnit::FlowM3s => "flow",
+        SemanticUnit::VibrationMmS | SemanticUnit::VibrationUmS => "vibration",
+        SemanticUnit::CurrentMa | SemanticUnit::CurrentA => "current",
+        SemanticUnit::VoltageMv | SemanticUnit::VoltageV => "voltage",
+        SemanticUnit::PowerW | SemanticUnit::PowerKw => "power",
+        SemanticUnit::EnergyWh | SemanticUnit::EnergyKwh => "energy",
+        SemanticUnit::FrequencyHz | SemanticUnit::FrequencyKhz => "frequency",
+        SemanticUnit::SpeedRpm | SemanticUnit::SpeedRps => "speed",
+        SemanticUnit::Percentage => "percentage",
+    }
+}
+
+fn contains_any(value: &str, patterns: &[&str]) -> bool {
+    patterns.iter().any(|pattern| value.contains(pattern))
+}
+
+fn bigram_similarity(left: &str, right: &str) -> f64 {
+    let left = character_bigrams(left);
+    let right = character_bigrams(right);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let intersection = left.intersection(&right).count() as f64;
+    let union = left.union(&right).count() as f64;
+    if union <= f64::EPSILON {
+        0.0
+    } else {
+        intersection / union
+    }
+}
+
+fn character_bigrams(value: &str) -> BTreeSet<String> {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() < 2 {
+        return chars.into_iter().map(|ch| ch.to_string()).collect();
+    }
+    let mut out = BTreeSet::new();
+    for window in chars.windows(2) {
+        out.insert(window.iter().collect::<String>());
+    }
+    out
 }
 
 fn modality_compatibility(primary: AlignmentModality, secondary: AlignmentModality) -> f64 {
@@ -997,12 +1317,14 @@ fn aligned_source_confidence(
     source_prior: f64,
     semantic_score: f64,
     modality_score: f64,
+    unit_score: f64,
     confidence_alignment: bool,
 ) -> f64 {
     if !confidence_alignment {
         source_prior
     } else {
-        (source_prior * 0.5 + semantic_score * 0.3 + modality_score * 0.2).clamp(0.2, 1.0)
+        (source_prior * 0.42 + semantic_score * 0.24 + modality_score * 0.18 + unit_score * 0.16)
+            .clamp(0.2, 1.0)
     }
 }
 
@@ -1031,9 +1353,10 @@ fn aligned_binding_confidence(
     };
 
     (base_confidence * 0.35
-        + source.semantic_score * 0.2
-        + binding.semantic_score * 0.2
-        + binding.modality_score * 0.15
+        + source.semantic_score * 0.18
+        + binding.semantic_score * 0.18
+        + binding.modality_score * 0.14
+        + binding.unit_score * 0.1
         + time_score * 0.05
         + value_quality * 0.05)
         .clamp(0.1, 1.25)
@@ -1091,8 +1414,12 @@ fn value_quality_score(cell: &Option<String>, modality: AlignmentModality) -> f6
     match cell.as_ref() {
         Some(value) if !value.trim().is_empty() => match modality {
             AlignmentModality::Continuous => parse_numeric(value).map(|_| 1.0).unwrap_or(0.5),
-            AlignmentModality::State => 0.92,
-            AlignmentModality::Event => 0.88,
+            AlignmentModality::State => normalize_modal_value(value, modality)
+                .map(|normalized| if normalized == value.trim() { 0.95 } else { 0.9 })
+                .unwrap_or(0.82),
+            AlignmentModality::Event => normalize_modal_value(value, modality)
+                .map(|normalized| if normalized == value.trim() { 0.92 } else { 0.87 })
+                .unwrap_or(0.8),
             AlignmentModality::Text => 0.85,
         },
         _ => 0.35,
@@ -1708,11 +2035,197 @@ fn map_secondary_time_column(table: &DataTable, primary_time: &str) -> Result<St
 
 fn map_secondary_column(table: &DataTable, primary_name: &str) -> Result<String> {
     let primary_normalized = normalize_name(primary_name);
-    table.columns
+    if let Some(column) = table
+        .columns
         .iter()
         .find(|column| normalize_name(&column.name) == primary_normalized)
-        .map(|column| column.name.clone())
-        .ok_or_else(|| anyhow!("辅源未找到与 {primary_name} 同名的字段"))
+    {
+        return Ok(column.name.clone());
+    }
+
+    let primary_canonical = canonical_semantic_name(primary_name);
+    let mut best: Option<(&TableColumn, f64)> = None;
+    for column in &table.columns {
+        let score = semantic_similarity(&primary_canonical, &canonical_semantic_name(&column.name));
+        if score < 0.84 {
+            continue;
+        }
+        match best {
+            Some((_, best_score)) if score <= best_score => {}
+            _ => best = Some((column, score)),
+        }
+    }
+
+    best
+        .map(|(column, _)| column.name.clone())
+        .ok_or_else(|| anyhow!("辅源未找到与 {primary_name} 同义的字段"))
+}
+
+fn transform_binding_cell(binding: &OutputBinding, cell: &Option<String>) -> CellTransform {
+    let mut transformed = CellTransform {
+        cell: cell.clone(),
+        unit_converted: false,
+        modal_normalized: false,
+    };
+    let Some(raw_value) = transformed.cell.clone() else {
+        return transformed;
+    };
+    if raw_value.trim().is_empty() {
+        return transformed;
+    }
+
+    if let (Some(primary_unit), Some(secondary_unit)) = (binding.primary_unit, binding.secondary_unit) {
+        if primary_unit != secondary_unit
+            && can_convert_unit(primary_unit, secondary_unit)
+            && matches!(binding.secondary_modality, AlignmentModality::Continuous)
+            && let Some(numeric) = parse_numeric(&raw_value)
+            && let Some(converted) = convert_numeric_unit(numeric, secondary_unit, primary_unit)
+        {
+            transformed.cell = Some(format_number(converted));
+            transformed.unit_converted = true;
+        }
+    }
+
+    if matches!(
+        binding.secondary_modality,
+        AlignmentModality::State | AlignmentModality::Event | AlignmentModality::Text
+    ) {
+        if let Some(normalized) = normalize_modal_value(
+            transformed.cell.as_deref().unwrap_or_default(),
+            binding.secondary_modality,
+        ) {
+            transformed.modal_normalized = normalized != raw_value.trim();
+            transformed.cell = Some(normalized);
+        }
+    }
+
+    transformed
+}
+
+fn convert_numeric_unit(value: f64, from: SemanticUnit, to: SemanticUnit) -> Option<f64> {
+    if from == to {
+        return Some(value);
+    }
+    match (from, to) {
+        (SemanticUnit::TemperatureF, SemanticUnit::TemperatureC) => Some((value - 32.0) / 1.8),
+        (SemanticUnit::TemperatureC, SemanticUnit::TemperatureF) => Some(value * 1.8 + 32.0),
+        (SemanticUnit::TemperatureK, SemanticUnit::TemperatureC) => Some(value - 273.15),
+        (SemanticUnit::TemperatureC, SemanticUnit::TemperatureK) => Some(value + 273.15),
+        (SemanticUnit::TemperatureF, SemanticUnit::TemperatureK) => Some((value - 32.0) / 1.8 + 273.15),
+        (SemanticUnit::TemperatureK, SemanticUnit::TemperatureF) => Some((value - 273.15) * 1.8 + 32.0),
+        _ if measurement_domain(from) != measurement_domain(to) => None,
+        _ => {
+            let base = convert_to_base_unit(value, from)?;
+            convert_from_base_unit(base, to)
+        }
+    }
+}
+
+fn convert_to_base_unit(value: f64, unit: SemanticUnit) -> Option<f64> {
+    Some(match unit {
+        SemanticUnit::PressurePa => value,
+        SemanticUnit::PressureKpa => value * 1_000.0,
+        SemanticUnit::PressureMpa => value * 1_000_000.0,
+        SemanticUnit::PressureBar => value * 100_000.0,
+        SemanticUnit::FlowLpm => value / 60_000.0,
+        SemanticUnit::FlowM3h => value / 3_600.0,
+        SemanticUnit::FlowM3s => value,
+        SemanticUnit::VibrationMmS => value,
+        SemanticUnit::VibrationUmS => value / 1_000.0,
+        SemanticUnit::CurrentMa => value / 1_000.0,
+        SemanticUnit::CurrentA => value,
+        SemanticUnit::VoltageMv => value / 1_000.0,
+        SemanticUnit::VoltageV => value,
+        SemanticUnit::PowerW => value,
+        SemanticUnit::PowerKw => value * 1_000.0,
+        SemanticUnit::EnergyWh => value,
+        SemanticUnit::EnergyKwh => value * 1_000.0,
+        SemanticUnit::FrequencyHz => value,
+        SemanticUnit::FrequencyKhz => value * 1_000.0,
+        SemanticUnit::SpeedRpm => value / 60.0,
+        SemanticUnit::SpeedRps => value,
+        SemanticUnit::Percentage => value,
+        SemanticUnit::TemperatureC | SemanticUnit::TemperatureF | SemanticUnit::TemperatureK => return None,
+    })
+}
+
+fn convert_from_base_unit(value: f64, unit: SemanticUnit) -> Option<f64> {
+    Some(match unit {
+        SemanticUnit::PressurePa => value,
+        SemanticUnit::PressureKpa => value / 1_000.0,
+        SemanticUnit::PressureMpa => value / 1_000_000.0,
+        SemanticUnit::PressureBar => value / 100_000.0,
+        SemanticUnit::FlowLpm => value * 60_000.0,
+        SemanticUnit::FlowM3h => value * 3_600.0,
+        SemanticUnit::FlowM3s => value,
+        SemanticUnit::VibrationMmS => value,
+        SemanticUnit::VibrationUmS => value * 1_000.0,
+        SemanticUnit::CurrentMa => value * 1_000.0,
+        SemanticUnit::CurrentA => value,
+        SemanticUnit::VoltageMv => value * 1_000.0,
+        SemanticUnit::VoltageV => value,
+        SemanticUnit::PowerW => value,
+        SemanticUnit::PowerKw => value / 1_000.0,
+        SemanticUnit::EnergyWh => value,
+        SemanticUnit::EnergyKwh => value / 1_000.0,
+        SemanticUnit::FrequencyHz => value,
+        SemanticUnit::FrequencyKhz => value / 1_000.0,
+        SemanticUnit::SpeedRpm => value * 60.0,
+        SemanticUnit::SpeedRps => value,
+        SemanticUnit::Percentage => value,
+        SemanticUnit::TemperatureC | SemanticUnit::TemperatureF | SemanticUnit::TemperatureK => return None,
+    })
+}
+
+fn normalize_modal_value(value: &str, modality: AlignmentModality) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = normalize_name(trimmed);
+    let mapped = match modality {
+        AlignmentModality::State => {
+            if contains_any(&normalized, &["run", "running", "online", "normal", "生产", "运行"]) {
+                "RUN"
+            } else if contains_any(&normalized, &["stop", "stopped", "offline", "停机", "停止"]) {
+                "STOP"
+            } else if contains_any(&normalized, &["maint", "maintenance", "repair", "维护", "检修"]) {
+                "MAINT"
+            } else if contains_any(&normalized, &["alarm", "fault", "trip", "告警", "报警", "故障"]) {
+                "ALARM"
+            } else if contains_any(&normalized, &["idle", "standby", "待机", "空闲"]) {
+                "IDLE"
+            } else if contains_any(&normalized, &["manual", "hand", "手动"]) {
+                "MANUAL"
+            } else if contains_any(&normalized, &["auto", "automatic", "自动"]) {
+                "AUTO"
+            } else {
+                return Some(trimmed.to_uppercase());
+            }
+        }
+        AlignmentModality::Event => {
+            if contains_any(&normalized, &["start", "启动", "开机"]) {
+                "START"
+            } else if contains_any(&normalized, &["stop", "停机", "停止"]) {
+                "STOP"
+            } else if contains_any(&normalized, &["trip", "跳闸"]) {
+                "TRIP"
+            } else if contains_any(&normalized, &["alarm", "warn", "fault", "告警", "报警", "故障"]) {
+                "ALARM"
+            } else if contains_any(&normalized, &["reset", "复位"]) {
+                "RESET"
+            } else if contains_any(&normalized, &["open", "开启", "打开"]) {
+                "OPEN"
+            } else if contains_any(&normalized, &["close", "关闭", "关断"]) {
+                "CLOSE"
+            } else {
+                return Some(trimmed.to_uppercase());
+            }
+        }
+        AlignmentModality::Text => return Some(trimmed.to_string()),
+        AlignmentModality::Continuous => return Some(trimmed.to_string()),
+    };
+    Some(mapped.to_string())
 }
 
 fn source_confidence(source: SourceBundle<'_>, missing_ratio: f64) -> f64 {
@@ -1748,6 +2261,8 @@ fn compute_quality_score(
     secondary_field_count: usize,
     missing_fields: usize,
     anomaly_cells: usize,
+    correction_count: usize,
+    row_confidence: f64,
     traces: &[String],
 ) -> f64 {
     let source_coverage_penalty = if source_count == 0 {
@@ -1762,7 +2277,30 @@ fn compute_quality_score(
     };
     let anomaly_penalty = (anomaly_cells as f64 * 4.0).min(24.0);
     let mismatch_penalty = traces.iter().filter(|trace| trace.contains("未命中")).count() as f64 * 4.0;
-    (100.0 - source_coverage_penalty - missing_penalty - anomaly_penalty - mismatch_penalty).clamp(0.0, 100.0)
+    let correction_penalty = (correction_count as f64 * 2.0).min(12.0);
+    let confidence_penalty = (1.0 - row_confidence.clamp(0.0, 1.0)) * 18.0;
+    (100.0
+        - source_coverage_penalty
+        - missing_penalty
+        - anomaly_penalty
+        - mismatch_penalty
+        - correction_penalty
+        - confidence_penalty)
+        .clamp(0.0, 100.0)
+}
+
+fn compute_row_confidence(primary_weights: &[f64], secondary_weights: &[f64]) -> f64 {
+    let values = primary_weights
+        .iter()
+        .copied()
+        .chain(secondary_weights.iter().copied())
+        .filter(|weight| *weight > 0.0)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        0.0
+    } else {
+        (values.iter().sum::<f64>() / values.len() as f64).clamp(0.0, 1.25)
+    }
 }
 
 fn clean_outliers_in_rows(rows: &mut [PreparedRow], table: &DataTable, zscore_threshold: f64) -> usize {
@@ -2024,10 +2562,52 @@ fn aggregate_window_column(selected: &[(&PreparedRow, i64)], column_index: usize
         return Some(format_number(mean));
     }
 
+    let mut weighted_votes = BTreeMap::<String, f64>::new();
+    for (row, distance) in selected {
+        if let Some(value) = row
+            .cells
+            .get(column_index)
+            .and_then(|cell| cell.as_ref())
+            .map(|value| normalize_vote_text_value(value))
+            .filter(|value| !value.trim().is_empty())
+        {
+            let weight = 1.0 / (1.0 + *distance as f64);
+            *weighted_votes.entry(value).or_insert(0.0) += weight;
+        }
+    }
+    if let Some((best_value, _)) = weighted_votes
+        .into_iter()
+        .max_by(|left, right| left.1.partial_cmp(&right.1).unwrap_or(Ordering::Equal))
+    {
+        return Some(best_value);
+    }
+
     selected
         .iter()
         .min_by_key(|(_, distance)| *distance)
         .and_then(|(row, _)| row.cells.get(column_index).cloned().unwrap_or(None))
+}
+
+fn normalize_vote_text_value(value: &str) -> String {
+    let trimmed = value.trim();
+    let normalized = normalize_name(trimmed);
+    if contains_any(&normalized, &["run", "running", "online", "正常", "运行"]) {
+        "RUN".to_string()
+    } else if contains_any(&normalized, &["stop", "stopped", "offline", "停机", "停止"]) {
+        "STOP".to_string()
+    } else if contains_any(&normalized, &["maint", "maintenance", "维护", "检修"]) {
+        "MAINT".to_string()
+    } else if contains_any(&normalized, &["alarm", "warn", "fault", "告警", "报警", "故障"]) {
+        "ALARM".to_string()
+    } else if contains_any(&normalized, &["start", "启动", "开机"]) {
+        "START".to_string()
+    } else if contains_any(&normalized, &["trip", "跳闸"]) {
+        "TRIP".to_string()
+    } else if contains_any(&normalized, &["reset", "复位"]) {
+        "RESET".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn group_row_indexes(rows: &[PreparedRow]) -> BTreeMap<String, Vec<usize>> {
@@ -2142,15 +2722,22 @@ fn parse_datetime_cell(value: Option<&String>) -> Option<NaiveDateTime> {
 }
 
 fn parse_datetime_value(value: &str) -> Option<NaiveDateTime> {
-    const DATETIME_PATTERNS: [&str; 8] = [
+    const DATETIME_PATTERNS: [&str; 15] = [
         "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
         "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S%.f",
+        "%Y.%m.%d %H:%M:%S",
+        "%Y.%m.%d %H:%M:%S%.f",
         "%Y-%m-%d %H:%M",
         "%Y/%m/%d %H:%M",
+        "%Y.%m.%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%d",
         "%Y/%m/%d",
+        "%Y.%m.%d",
         "%Y%m%d",
-        "%+",
     ];
 
     if let Ok(timestamp) = DateTime::parse_from_rfc3339(value.trim()) {
