@@ -2464,8 +2464,35 @@ export component MainWindow inherits Window {
                                                     }
                                                 }
 
+                                                HorizontalBox {
+                                                    spacing: 6px;
+
+                                                    InlineToggleButton {
+                                                        width: 110px;
+                                                        label: "语义对齐";
+                                                        checked <=> FormState.fusion-semantic-alignment;
+                                                    }
+
+                                                    InlineToggleButton {
+                                                        width: 110px;
+                                                        label: "模态对齐";
+                                                        checked <=> FormState.fusion-modality-alignment;
+                                                    }
+
+                                                    InlineToggleButton {
+                                                        width: 110px;
+                                                        label: "置信校准";
+                                                        checked <=> FormState.fusion-confidence-alignment;
+                                                    }
+
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        min-width: 0px;
+                                                    }
+                                                }
+
                                                 Text {
-                                                    text: "建议：严格同频数据用精确对齐；轻微时钟偏差用最近邻；传感抖动或批量采样用时间窗聚合；低频状态量用重采样。";
+                                                    text: "建议：先开语义对齐和模态对齐做字段约束，再用置信校准统一多源权重；严格同频数据用精确对齐，低频状态量用重采样。";
                                                     color: AppTheme.text-soft;
                                                     font-size: 10px;
                                                     wrap: word-wrap;

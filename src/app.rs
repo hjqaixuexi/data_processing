@@ -1504,7 +1504,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         } else {
             state.set_fusion_source_summary("未执行融合，默认以当前选中数据集作为主源。".into());
             state.set_fusion_alignment_summary("等待选择辅源、对象键和时间列。".into());
-            state.set_fusion_quality_summary("支持去重包、异常清洗、缺失补偿和质量评分。".into());
+            state.set_fusion_quality_summary("支持语义对齐、模态对齐、置信校准、异常清洗、缺失补偿和质量评分。".into());
             state.set_fusion_output_summary("执行后只生成一张融合结果表。".into());
             state.set_fusion_trace_summary(
                 "结果会保留质量分、匹配轨迹和修正记录三个追踪字段。".into(),
@@ -1574,7 +1574,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_join_loss_summary("尚未生成数据丢失提示".into());
         state.set_fusion_source_summary("导入多个数据集后可在此执行多源融合。".into());
         state.set_fusion_alignment_summary("等待主源、辅源、对象键和时间列。".into());
-        state.set_fusion_quality_summary("默认支持去重包、异常清洗、缺失补偿和质量评分。".into());
+        state.set_fusion_quality_summary("默认支持语义对齐、模态对齐、置信校准、异常清洗、缺失补偿和质量评分。".into());
         state.set_fusion_output_summary("统一时序表仅保留必要的质量分、轨迹和修正字段。".into());
         state.set_fusion_trace_summary("只生成融合结果表，不再生成特征表、事件表和告警表。".into());
     }
@@ -1682,6 +1682,9 @@ fn build_fusion_request(form: &FormState) -> FusionRequest {
         deduplicate_packets: form.get_fusion_deduplicate_packets(),
         clean_outliers: form.get_fusion_clean_outliers(),
         score_quality: form.get_fusion_score_quality(),
+        semantic_alignment: form.get_fusion_semantic_alignment(),
+        modality_alignment: form.get_fusion_modality_alignment(),
+        confidence_alignment: form.get_fusion_confidence_alignment(),
         generate_features: false,
         generate_events: false,
         generate_alerts: false,

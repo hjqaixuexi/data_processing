@@ -116,11 +116,56 @@ pub struct FusionRequest {
     pub deduplicate_packets: bool,
     pub clean_outliers: bool,
     pub score_quality: bool,
+    pub semantic_alignment: bool,
+    pub modality_alignment: bool,
+    pub confidence_alignment: bool,
     pub generate_features: bool,
     pub generate_events: bool,
     pub generate_alerts: bool,
     pub outlier_zscore: f64,
     pub alert_threshold: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AlignmentModality {
+    Continuous,
+    State,
+    Event,
+    Text,
+}
+
+#[derive(Clone, Debug)]
+struct ColumnAlignmentProfile {
+    canonical_name: String,
+    modality: AlignmentModality,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct SemanticAlignmentQuery {
+    pub primary_name: String,
+    pub secondary_name: String,
+    pub primary_samples: Vec<String>,
+    pub secondary_samples: Vec<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct SemanticAlignmentDecision {
+    pub accepted: bool,
+    pub semantic_score: f64,
+    pub canonical_name: Option<String>,
+    pub note: Option<String>,
+}
+
+#[allow(dead_code)]
+pub trait AlignmentModelAdapter {
+    fn arbitrate_semantic_match(
+        &self,
+        _query: &SemanticAlignmentQuery,
+    ) -> Option<SemanticAlignmentDecision> {
+        None
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -163,6 +208,9 @@ struct OutputBinding {
     output_name: String,
     logical_type: LogicalType,
     overlaps_primary: Option<usize>,
+    semantic_score: f64,
+    modality_score: f64,
+    secondary_modality: AlignmentModality,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +220,8 @@ struct PreparedSource {
     rows_by_key: BTreeMap<String, Vec<PreparedRow>>,
     bindings: Vec<OutputBinding>,
     confidence: f64,
+    semantic_score: f64,
+    modality_score: f64,
     deduplicated_rows: usize,
 }
 
@@ -181,6 +231,7 @@ struct MatchResult {
     time_distance_seconds: Option<i64>,
     anomaly_cells: usize,
     confidence_weight: f64,
+    time_score: f64,
     trace: String,
 }
 
@@ -224,6 +275,12 @@ pub fn execute(
         .enumerate()
         .map(|(index, column)| (normalize_name(&column.name), index))
         .collect::<HashMap<_, _>>();
+    let primary_profiles = primary
+        .table
+        .columns
+        .iter()
+        .map(build_column_alignment_profile)
+        .collect::<Vec<_>>();
 
     let mut secondary_prepared = Vec::new();
     let mut skipped_sources = Vec::new();
@@ -232,6 +289,7 @@ pub fn execute(
             *source,
             &object_keys,
             &time_column,
+            &primary_profiles,
             &primary_name_map,
             request,
         ) {
@@ -253,6 +311,9 @@ pub fn execute(
         .iter()
         .map(|source| source.bindings.len())
         .sum::<usize>();
+    let average_semantic_score = average_source_metric(&secondary_prepared, |source| source.semantic_score);
+    let average_modality_score = average_source_metric(&secondary_prepared, |source| source.modality_score);
+    let average_confidence_score = average_source_metric(&secondary_prepared, |source| source.confidence);
     let (headers, logical_types) = build_output_schema(primary.table, &mut secondary_prepared);
     let data_width = headers.len();
     let primary_width = primary.table.width();
@@ -297,12 +358,20 @@ pub fn execute(
                     if cell.is_none() {
                         missing_fields += 1;
                     }
+                    let candidate_weight = aligned_binding_confidence(
+                        source,
+                        binding,
+                        &cell,
+                        found.confidence_weight,
+                        found.time_score,
+                        request.confidence_alignment,
+                    );
                     if let Some(primary_index) = binding.overlaps_primary {
                         apply_fusion_strategy(
                             &mut row[primary_index],
                             &cell,
                             &mut primary_weights[primary_index],
-                            found.confidence_weight,
+                            candidate_weight,
                             &request.fusion_strategy,
                         );
                     } else {
@@ -429,16 +498,19 @@ pub fn execute(
             average_time_distance
         ),
         quality_summary: format!(
-            "{} | 去重 {} 行 | 异常剔除 {} 个单元 | 缺失填补 {} | 平均质量分 {:.1}",
+            "{} | 去重 {} 行 | 异常剔除 {} 个单元 | 缺失填补 {} | 平均质量分 {:.1} | 置信度 {:.2}",
             if request.score_quality { "已启用质量评分" } else { "质量评分关闭" },
             secondary_prepared.iter().map(|source| source.deduplicated_rows).sum::<usize>(),
             total_anomaly_cells,
             request.missing_strategy.as_str(),
-            average_quality_score
+            average_quality_score,
+            average_confidence_score
         ),
         output_summary,
         trace_summary: format!(
-            "保留 3 个追踪字段；辅源平均缺失补位 {:.1} 个字段；未映射辅源 {} 个",
+            "保留 3 个追踪字段；语义对齐 {:.2}；模态对齐 {:.2}；辅源平均缺失补位 {:.1} 个字段；未映射辅源 {} 个",
+            average_semantic_score,
+            average_modality_score,
             if primary_prepared.is_empty() {
                 0.0
             } else {
@@ -492,6 +564,7 @@ fn prepare_secondary_source(
     source: SourceBundle<'_>,
     primary_object_keys: &[String],
     primary_time_column: &str,
+    primary_profiles: &[ColumnAlignmentProfile],
     primary_name_map: &HashMap<String, usize>,
     request: &FusionRequest,
 ) -> Result<PreparedSource> {
@@ -527,18 +600,35 @@ fn prepare_secondary_source(
     let deduplicated_rows = original_len.saturating_sub(
         rows_by_key.values().map(|group| group.len()).sum::<usize>(),
     );
-    let bindings = build_output_bindings(source, &mapped_object_keys, &time_column, primary_name_map);
+    let bindings = build_output_bindings(
+        source,
+        &mapped_object_keys,
+        &time_column,
+        primary_profiles,
+        primary_name_map,
+        request,
+    );
     if bindings.is_empty() {
         bail!("没有可供融合的有效字段");
     }
 
     let missing_ratio = compute_missing_ratio(source.table);
+    let raw_confidence = source_confidence(source, missing_ratio);
+    let semantic_score = average_binding_metric(&bindings, |binding| binding.semantic_score);
+    let modality_score = average_binding_metric(&bindings, |binding| binding.modality_score);
     Ok(PreparedSource {
         dataset_name: source.dataset_name.to_string(),
         trace_label: String::new(),
         rows_by_key,
         bindings,
-        confidence: source_confidence(source, missing_ratio),
+        confidence: aligned_source_confidence(
+            raw_confidence,
+            semantic_score,
+            modality_score,
+            request.confidence_alignment,
+        ),
+        semantic_score,
+        modality_score,
         deduplicated_rows,
     })
 }
@@ -648,7 +738,9 @@ fn build_output_bindings(
     source: SourceBundle<'_>,
     object_keys: &[String],
     time_column: &str,
+    primary_profiles: &[ColumnAlignmentProfile],
     primary_name_map: &HashMap<String, usize>,
+    request: &FusionRequest,
 ) -> Vec<OutputBinding> {
     let object_key_names = object_keys.iter().map(|name| normalize_name(name)).collect::<BTreeSet<_>>();
     let time_name = normalize_name(time_column);
@@ -663,14 +755,286 @@ fn build_output_bindings(
             if object_key_names.contains(&normalized) || normalized == time_name {
                 return None;
             }
+            let secondary_profile = build_column_alignment_profile(column);
+            let (overlaps_primary, semantic_score, modality_score) = resolve_primary_overlap(
+                &normalized,
+                &secondary_profile,
+                primary_profiles,
+                primary_name_map,
+                request.semantic_alignment,
+                request.modality_alignment,
+            );
             Some(OutputBinding {
                 source_index: index,
                 output_name: column.name.clone(),
                 logical_type: column.logical_type.clone(),
-                overlaps_primary: primary_name_map.get(&normalized).copied(),
+                overlaps_primary,
+                semantic_score,
+                modality_score,
+                secondary_modality: secondary_profile.modality,
             })
         })
         .collect()
+}
+
+fn build_column_alignment_profile(column: &TableColumn) -> ColumnAlignmentProfile {
+    ColumnAlignmentProfile {
+        canonical_name: canonical_semantic_name(&column.name),
+        modality: classify_column_modality(column),
+    }
+}
+
+fn canonical_semantic_name(value: &str) -> String {
+    let normalized = normalize_name(value);
+    if normalized.contains("temperature") || normalized == "temp" || value.contains("温度") {
+        "temperature".to_string()
+    } else if normalized.contains("pressure") || normalized == "press" || value.contains("压力") {
+        "pressure".to_string()
+    } else if normalized.contains("vibration") || normalized == "vib" || value.contains("振动") {
+        "vibration".to_string()
+    } else if normalized.contains("flowrate") || normalized == "flow" || value.contains("流量") {
+        "flow_rate".to_string()
+    } else if normalized.contains("timestamp")
+        || normalized == "time"
+        || normalized == "datetime"
+        || value.contains("时间")
+    {
+        "timestamp".to_string()
+    } else if normalized.contains("deviceid")
+        || normalized == "device"
+        || normalized == "channelid"
+        || normalized == "pointid"
+        || value.contains("设备")
+    {
+        "device_id".to_string()
+    } else if normalized.contains("state") || normalized.contains("status") || value.contains("状态") {
+        "state".to_string()
+    } else if normalized.contains("command") || normalized.contains("control") || value.contains("指令") {
+        "command".to_string()
+    } else if normalized.contains("alarm") || value.contains("告警") {
+        "alarm".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn classify_column_modality(column: &TableColumn) -> AlignmentModality {
+    let normalized = normalize_name(&column.name);
+    if matches!(column.logical_type, LogicalType::Integer | LogicalType::Float) {
+        if normalized.contains("state") || normalized.contains("status") || normalized.contains("mode") {
+            AlignmentModality::State
+        } else if normalized.contains("event")
+            || normalized.contains("command")
+            || normalized.contains("alarm")
+            || normalized.contains("action")
+        {
+            AlignmentModality::Event
+        } else {
+            AlignmentModality::Continuous
+        }
+    } else if normalized.contains("state")
+        || normalized.contains("status")
+        || normalized.contains("mode")
+        || normalized.contains("phase")
+        || normalized.contains("flag")
+    {
+        AlignmentModality::State
+    } else if normalized.contains("event")
+        || normalized.contains("command")
+        || normalized.contains("alarm")
+        || normalized.contains("action")
+        || normalized.contains("fault")
+    {
+        AlignmentModality::Event
+    } else {
+        AlignmentModality::Text
+    }
+}
+
+fn resolve_primary_overlap(
+    secondary_raw_name: &str,
+    secondary_profile: &ColumnAlignmentProfile,
+    primary_profiles: &[ColumnAlignmentProfile],
+    primary_name_map: &HashMap<String, usize>,
+    semantic_alignment: bool,
+    modality_alignment: bool,
+) -> (Option<usize>, f64, f64) {
+    if let Some(index) = primary_name_map.get(secondary_raw_name).copied() {
+        let modality_score = modality_compatibility(
+            primary_profiles
+                .get(index)
+                .map(|profile| profile.modality)
+                .unwrap_or(AlignmentModality::Text),
+            secondary_profile.modality,
+        );
+        if !modality_alignment || modality_score > 0.0 {
+            return (Some(index), 1.0, modality_score.max(0.72));
+        }
+    }
+
+    if !semantic_alignment {
+        return (None, 0.55, 0.55);
+    }
+
+    let mut best: Option<(usize, f64, f64)> = None;
+    for (index, profile) in primary_profiles.iter().enumerate() {
+        let semantic_score = semantic_similarity(&profile.canonical_name, &secondary_profile.canonical_name);
+        if semantic_score < 0.72 {
+            continue;
+        }
+        let modality_score = modality_compatibility(profile.modality, secondary_profile.modality);
+        if modality_alignment && modality_score <= 0.0 {
+            continue;
+        }
+        let combined = semantic_score * 0.7 + modality_score * 0.3;
+        match best {
+            Some((_, best_combined, _)) if combined <= best_combined => {}
+            _ => best = Some((index, combined, modality_score)),
+        }
+    }
+
+    if let Some((index, combined, modality_score)) = best {
+        (Some(index), combined, modality_score)
+    } else {
+        (None, 0.55, 0.55)
+    }
+}
+
+fn semantic_similarity(primary: &str, secondary: &str) -> f64 {
+    if primary == secondary {
+        1.0
+    } else if primary.contains(secondary) || secondary.contains(primary) {
+        0.84
+    } else {
+        jaccard_token_similarity(primary, secondary).max(0.0)
+    }
+}
+
+fn jaccard_token_similarity(left: &str, right: &str) -> f64 {
+    let left_tokens = semantic_tokens(left);
+    let right_tokens = semantic_tokens(right);
+    if left_tokens.is_empty() || right_tokens.is_empty() {
+        return 0.0;
+    }
+    let intersection = left_tokens.intersection(&right_tokens).count() as f64;
+    let union = left_tokens.union(&right_tokens).count() as f64;
+    if union <= f64::EPSILON {
+        0.0
+    } else {
+        intersection / union
+    }
+}
+
+fn semantic_tokens(value: &str) -> BTreeSet<String> {
+    split_canonical_name(value)
+        .into_iter()
+        .collect()
+}
+
+fn split_canonical_name(value: &str) -> Vec<String> {
+    if value.contains('_') {
+        value
+            .split('_')
+            .filter(|part| !part.trim().is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        vec![value.to_string()]
+    }
+}
+
+fn modality_compatibility(primary: AlignmentModality, secondary: AlignmentModality) -> f64 {
+    match (primary, secondary) {
+        (AlignmentModality::Continuous, AlignmentModality::Continuous) => 1.0,
+        (AlignmentModality::State, AlignmentModality::State) => 1.0,
+        (AlignmentModality::Event, AlignmentModality::Event) => 1.0,
+        (AlignmentModality::Text, AlignmentModality::Text) => 0.92,
+        (AlignmentModality::State, AlignmentModality::Text)
+        | (AlignmentModality::Text, AlignmentModality::State) => 0.72,
+        (AlignmentModality::Event, AlignmentModality::Text)
+        | (AlignmentModality::Text, AlignmentModality::Event) => 0.66,
+        (AlignmentModality::Continuous, AlignmentModality::Text)
+        | (AlignmentModality::Text, AlignmentModality::Continuous) => 0.0,
+        (AlignmentModality::Continuous, AlignmentModality::State)
+        | (AlignmentModality::State, AlignmentModality::Continuous) => 0.0,
+        (AlignmentModality::Continuous, AlignmentModality::Event)
+        | (AlignmentModality::Event, AlignmentModality::Continuous) => 0.0,
+        (AlignmentModality::State, AlignmentModality::Event)
+        | (AlignmentModality::Event, AlignmentModality::State) => 0.35,
+    }
+}
+
+fn average_binding_metric<F>(bindings: &[OutputBinding], pick: F) -> f64
+where
+    F: Fn(&OutputBinding) -> f64,
+{
+    if bindings.is_empty() {
+        1.0
+    } else {
+        bindings.iter().map(pick).sum::<f64>() / bindings.len() as f64
+    }
+}
+
+fn average_source_metric<F>(sources: &[PreparedSource], pick: F) -> f64
+where
+    F: Fn(&PreparedSource) -> f64,
+{
+    if sources.is_empty() {
+        1.0
+    } else {
+        sources.iter().map(pick).sum::<f64>() / sources.len() as f64
+    }
+}
+
+fn aligned_source_confidence(
+    source_prior: f64,
+    semantic_score: f64,
+    modality_score: f64,
+    confidence_alignment: bool,
+) -> f64 {
+    if !confidence_alignment {
+        source_prior
+    } else {
+        (source_prior * 0.5 + semantic_score * 0.3 + modality_score * 0.2).clamp(0.2, 1.0)
+    }
+}
+
+fn aligned_binding_confidence(
+    source: &PreparedSource,
+    binding: &OutputBinding,
+    cell: &Option<String>,
+    base_confidence: f64,
+    time_score: f64,
+    confidence_alignment: bool,
+) -> f64 {
+    if !confidence_alignment {
+        return base_confidence;
+    }
+
+    let value_quality = if let Some(value) = cell.as_ref() {
+        if value.trim().is_empty() {
+            0.45
+        } else if matches!(binding.secondary_modality, AlignmentModality::Continuous) {
+            parse_numeric(value).map(|_| 1.0).unwrap_or(0.55)
+        } else {
+            0.9
+        }
+    } else {
+        0.35
+    };
+
+    (base_confidence * 0.35
+        + source.semantic_score * 0.2
+        + binding.semantic_score * 0.2
+        + binding.modality_score * 0.15
+        + time_score * 0.05
+        + value_quality * 0.05)
+        .clamp(0.1, 1.25)
+}
+
+fn time_alignment_score(distance: i64, window_seconds: i64) -> f64 {
+    let window = window_seconds.max(1) as f64;
+    (1.0 - (distance as f64 / window).min(1.0)).clamp(0.0, 1.0)
 }
 
 fn select_secondary_match(
@@ -696,6 +1060,7 @@ fn select_secondary_match(
                 time_distance_seconds: Some(0),
                 anomaly_cells: row.anomaly_cells,
                 confidence_weight: source.confidence,
+                time_score: 1.0,
                 trace: format!("{}: 精确命中", source.trace_label),
             }),
         FusionAlignmentMode::ExactThenNearest => group_rows
@@ -706,6 +1071,7 @@ fn select_secondary_match(
                 time_distance_seconds: Some(0),
                 anomaly_cells: row.anomaly_cells,
                 confidence_weight: source.confidence,
+                time_score: 1.0,
                 trace: format!("{}: 精确命中", source.trace_label),
             })
             .or_else(|| nearest_match(group_rows, primary_time, window_seconds, source)),
@@ -718,6 +1084,7 @@ fn select_secondary_match(
                 time_distance_seconds: Some(0),
                 anomaly_cells: row.anomaly_cells,
                 confidence_weight: source.confidence,
+                time_score: 1.0,
                 trace: format!("{}: 精确命中", source.trace_label),
             })
             .or_else(|| window_match(group_rows, primary_time, window_seconds, source)),
@@ -745,6 +1112,7 @@ fn nearest_match(
             time_distance_seconds: Some(distance),
             anomaly_cells: row.anomaly_cells,
             confidence_weight: time_weight(source.confidence, distance, window_seconds),
+            time_score: time_alignment_score(distance, window_seconds),
             trace: format!("{}: 最近邻 {}s", source.trace_label, distance),
         })
 }
@@ -777,6 +1145,7 @@ fn window_match(
         time_distance_seconds: Some(avg_distance),
         anomaly_cells: selected.iter().map(|(row, _)| row.anomaly_cells).sum::<usize>(),
         confidence_weight: time_weight(source.confidence, avg_distance, window_seconds),
+        time_score: time_alignment_score(avg_distance, window_seconds),
         trace: format!("{}: 时间窗聚合 {} 行", source.trace_label, selected.len()),
     })
 }
@@ -800,6 +1169,7 @@ fn resample_match(
             time_distance_seconds: Some(distance),
             anomaly_cells: row.anomaly_cells,
             confidence_weight: time_weight(source.confidence, distance, resample_seconds),
+            time_score: time_alignment_score(distance, resample_seconds),
             trace: format!("{}: 重采样桶命中 {}s", source.trace_label, distance),
         })
 }
