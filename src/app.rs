@@ -1,3 +1,6 @@
+﻿use crate::fusion::{
+    FusionAlignmentMode, FusionDefaults, FusionMissingStrategy, FusionRequest, FusionStrategy,
+};
 use crate::model::{
     AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetRecord, JoinConflictStrategy,
     JoinKind, LogicalType, PreviewRow, PriorityPlacement, StatisticFillStrategy, TextCaseMode,
@@ -923,6 +926,37 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
     });
 
     let weak = ui.as_weak();
+    ui.global::<Logic>().on_autofill_fusion({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let status = match service.suggest_fusion_defaults() {
+                    Ok(defaults) => {
+                        apply_fusion_defaults(&ui.global::<FormState>(), &defaults);
+                        "已根据当前主源和候选辅源自动识别融合参数".to_string()
+                    }
+                    Err(error) => format!("自动识别融合参数失败：{error:#}"),
+                };
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_apply_fusion({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let request = build_fusion_request(&ui.global::<FormState>());
+                let status = service
+                    .run_multi_source_fusion(request)
+                    .unwrap_or_else(|error| format!("多源融合失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
     ui.global::<Logic>().on_autofill_visualization({
         let service = service.clone();
         move || {
@@ -1294,6 +1328,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_can_undo(service.can_undo());
         state.set_can_redo(service.can_redo());
         state.set_join_target_hint(service.join_target_hint().into());
+        state.set_fusion_source_hint(service.fusion_source_hint().into());
         state.set_visualization_all_columns(build_string_model(visualization_all_columns(record)));
         state.set_visualization_numeric_columns(build_string_model(visualization_numeric_columns(record)));
         if let Ok(suggestion) =
@@ -1371,6 +1406,20 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
                 })
                 .collect::<Vec<_>>(),
         )));
+        state.set_fusion_hints(ModelRc::new(VecModel::from(
+            service
+                .fusion_source_hints()
+                .iter()
+                .map(|hint| FusionHintData {
+                    dataset_id: hint.dataset_id.to_string().into(),
+                    dataset_name: hint.dataset_name.clone().into(),
+                    role_hint: hint.role_hint.clone().into(),
+                    object_hint: hint.object_hint.clone().into(),
+                    time_hint: hint.time_hint.clone().into(),
+                    note: hint.note.clone().into(),
+                })
+                .collect::<Vec<_>>(),
+        )));
         if let Some(report) = service.last_join_report() {
             state.set_join_match_summary(format!("成功匹配 {} 条", report.matched_rows).into());
             state.set_join_unmatched_summary(
@@ -1399,6 +1448,24 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             state.set_join_conflict_summary("尚未生成冲突字段清单".into());
             state.set_join_loss_summary("尚未生成数据丢失提示".into());
         }
+        if let Some(report) = service.last_fusion_report() {
+            state.set_fusion_source_summary(report.source_summary.clone().into());
+            state.set_fusion_alignment_summary(report.alignment_summary.clone().into());
+            state.set_fusion_quality_summary(report.quality_summary.clone().into());
+            state.set_fusion_output_summary(report.output_summary.clone().into());
+            let trace = if report.skipped_sources.is_empty() {
+                report.trace_summary.clone()
+            } else {
+                format!("{} | 跳过辅源：{}", report.trace_summary, report.skipped_sources.join("；"))
+            };
+            state.set_fusion_trace_summary(trace.into());
+        } else {
+            state.set_fusion_source_summary("未执行融合，默认以当前选中数据集作为主源。".into());
+            state.set_fusion_alignment_summary("等待选择辅源、对象键和时间列。".into());
+            state.set_fusion_quality_summary("可选缺失补偿、异常剔除、去重包和质量评分。".into());
+            state.set_fusion_output_summary("执行后会生成统一时序表，并可附带特征表、事件表、告警表。".into());
+            state.set_fusion_trace_summary("每条结果会附带匹配轨迹、质量分、告警级别和修正记录。".into());
+        }
     } else {
         state.set_selected_dataset_id(0);
         state.set_current_dataset_name("尚未导入数据".into());
@@ -1417,6 +1484,24 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         form.set_visualization_title(SharedString::new());
         form.set_visualization_x_label(SharedString::new());
         form.set_visualization_y_label(SharedString::new());
+        if let Some(report) = service.last_fusion_report() {
+            state.set_fusion_source_summary(report.source_summary.clone().into());
+            state.set_fusion_alignment_summary(report.alignment_summary.clone().into());
+            state.set_fusion_quality_summary(report.quality_summary.clone().into());
+            state.set_fusion_output_summary(report.output_summary.clone().into());
+            let trace = if report.skipped_sources.is_empty() {
+                report.trace_summary.clone()
+            } else {
+                format!("{} | 跳过辅源：{}", report.trace_summary, report.skipped_sources.join("；"))
+            };
+            state.set_fusion_trace_summary(trace.into());
+        } else {
+            state.set_fusion_source_summary("未执行融合，默认以当前选中数据集作为主源。".into());
+            state.set_fusion_alignment_summary("等待选择辅源、对象键和时间列。".into());
+            state.set_fusion_quality_summary("可选缺失补偿、异常剔除、去重包和质量评分。".into());
+            state.set_fusion_output_summary("执行后会生成统一时序表，并可附带特征表、事件表、告警表。".into());
+            state.set_fusion_trace_summary("每条结果会附带匹配轨迹、质量分、告警级别和修正记录。".into());
+        }
         form.set_visualization_x_column(SharedString::new());
         form.set_visualization_y_column(SharedString::new());
         form.set_visualization_category_column(SharedString::new());
@@ -1441,6 +1526,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_can_undo(false);
         state.set_can_redo(false);
         state.set_join_target_hint("当前没有可融合的目标数据集".into());
+        state.set_fusion_source_hint("当前没有可用辅源数据集".into());
         state.set_visualization_all_columns(build_string_model(Vec::new()));
         state.set_visualization_numeric_columns(build_string_model(Vec::new()));
         state.set_visualization_suggestion_summary("导入并选中数据集后自动识别可视化字段".into());
@@ -1454,6 +1540,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_steps(ModelRc::new(VecModel::from(Vec::<StepRowData>::new())));
         state.set_mappings(ModelRc::new(VecModel::from(Vec::<MappingRowData>::new())));
         state.set_join_suggestions(ModelRc::new(VecModel::from(Vec::<JoinSuggestionData>::new())));
+        state.set_fusion_hints(ModelRc::new(VecModel::from(Vec::<FusionHintData>::new())));
         state.set_join_match_summary("尚未执行融合".into());
         state.set_join_unmatched_summary("尚未生成未匹配统计".into());
         state.set_join_conflict_summary("尚未生成冲突字段清单".into());
@@ -1545,6 +1632,64 @@ fn parse_adjacent_compare_mode(value: &str) -> AdjacentCompareMode {
     AdjacentCompareMode::from_text(value)
 }
 
+fn build_fusion_request(form: &FormState) -> FusionRequest {
+    FusionRequest {
+        scene: form.get_fusion_scene().to_string(),
+        secondary_dataset_ids: split_csv_like(&form.get_fusion_secondary_dataset_ids().to_string())
+            .iter()
+            .filter_map(|value| value.parse::<i32>().ok())
+            .collect(),
+        object_keys: split_csv_like(&form.get_fusion_object_keys().to_string()),
+        time_column: form.get_fusion_time_column().to_string(),
+        alignment_mode: FusionAlignmentMode::from_text(
+            &form.get_fusion_alignment_mode().to_string(),
+        ),
+        time_window_seconds: parse_i64_or_default(
+            &form.get_fusion_time_window_seconds().to_string(),
+            5,
+        ),
+        resample_seconds: parse_i64_or_default(
+            &form.get_fusion_resample_seconds().to_string(),
+            60,
+        ),
+        missing_strategy: FusionMissingStrategy::from_text(
+            &form.get_fusion_missing_strategy().to_string(),
+        ),
+        fusion_strategy: FusionStrategy::from_text(&form.get_fusion_strategy().to_string()),
+        deduplicate_packets: form.get_fusion_deduplicate_packets(),
+        clean_outliers: form.get_fusion_clean_outliers(),
+        score_quality: form.get_fusion_score_quality(),
+        generate_features: form.get_fusion_generate_features(),
+        generate_events: form.get_fusion_generate_events(),
+        generate_alerts: form.get_fusion_generate_alerts(),
+        outlier_zscore: parse_f64_or_default(&form.get_fusion_outlier_zscore().to_string(), 3.5),
+        alert_threshold: parse_f64_or_default(&form.get_fusion_alert_threshold().to_string(), 70.0),
+    }
+}
+
+fn apply_fusion_defaults(form: &FormState, defaults: &FusionDefaults) {
+    if form.get_fusion_secondary_dataset_ids().to_string().trim().is_empty() {
+        form.set_fusion_secondary_dataset_ids(
+            defaults
+                .secondary_dataset_ids
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+                .into(),
+        );
+    }
+    if form.get_fusion_object_keys().to_string().trim().is_empty() {
+        form.set_fusion_object_keys(defaults.object_keys.join(", ").into());
+    }
+    if form.get_fusion_time_column().to_string().trim().is_empty() {
+        form.set_fusion_time_column(defaults.time_column.clone().into());
+    }
+    form.set_fusion_alignment_mode(defaults.alignment_mode.as_str().into());
+    form.set_fusion_time_window_seconds(defaults.time_window_seconds.to_string().into());
+    form.set_fusion_resample_seconds(defaults.resample_seconds.to_string().into());
+}
+
 fn build_visualization_request(form: &FormState) -> VisualizationRequest {
     VisualizationRequest {
         chart_type: VisualizationChartType::from_text(&form.get_visualization_chart_type().to_string()),
@@ -1568,7 +1713,6 @@ fn build_visualization_request(form: &FormState) -> VisualizationRequest {
             1,
             100,
         ),
-        radar_max: parse_f64_or_default(&form.get_visualization_radar_max().to_string(), 1.0),
         filled: form.get_visualization_filled(),
         x_column: form.get_visualization_x_column().to_string(),
         y_column: form.get_visualization_y_column().to_string(),

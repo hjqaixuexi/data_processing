@@ -4,7 +4,6 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use kuva::plot::ViolinPlot;
 use kuva::plot::funnel::FunnelPlot;
 use kuva::plot::lollipop::LollipopPlot;
-use kuva::plot::radar::RadarPlot;
 use kuva::plot::scatter::MarkerShape;
 use kuva::prelude::*;
 use std::collections::BTreeMap;
@@ -14,6 +13,7 @@ use std::path::{Path, PathBuf};
 const PREVIEW_FILE_NAME: &str = "visualization_preview.png";
 const HEATMAP_MAX_ROWS: usize = 80;
 const EMPTY_OPTION: &str = "未选择";
+const CJK_FONT_STACK: &str = "Microsoft YaHei, SimHei, SimSun, DejaVu Sans, Liberation Sans, Arial, sans-serif";
 
 #[derive(Clone, Debug)]
 pub enum VisualizationChartType {
@@ -26,7 +26,6 @@ pub enum VisualizationChartType {
     Box,
     Violin,
     Lollipop,
-    Radar,
     Funnel,
     Heatmap,
 }
@@ -42,7 +41,6 @@ impl VisualizationChartType {
             "箱线图" => Self::Box,
             "小提琴图" => Self::Violin,
             "棒棒糖图" => Self::Lollipop,
-            "雷达图" => Self::Radar,
             "漏斗图" => Self::Funnel,
             "热力图" => Self::Heatmap,
             _ => Self::Line,
@@ -60,7 +58,6 @@ impl VisualizationChartType {
             Self::Box => "箱线图",
             Self::Violin => "小提琴图",
             Self::Lollipop => "棒棒糖图",
-            Self::Radar => "雷达图",
             Self::Funnel => "漏斗图",
             Self::Heatmap => "热力图",
         }
@@ -177,7 +174,6 @@ pub struct VisualizationRequest {
     pub line_width: f64,
     pub point_size: f64,
     pub histogram_bins: usize,
-    pub radar_max: f64,
     pub filled: bool,
     pub x_column: String,
     pub y_column: String,
@@ -246,11 +242,17 @@ pub fn suggest_fields(
         .or_else(|| category_columns.first().cloned())
         .or_else(|| all_columns.first().cloned())
         .unwrap_or_default();
+    let best_dimension_name = best_dimension.as_str();
     let best_group = category_columns
         .iter()
-        .find(|name| *name != &best_dimension)
+        .find(|name| name.as_str() != best_dimension_name)
         .cloned()
-        .or_else(|| all_columns.iter().find(|name| **name != best_dimension).cloned())
+        .or_else(|| {
+            all_columns
+                .iter()
+                .find(|name| name.as_str() != best_dimension_name)
+                .cloned()
+        })
         .unwrap_or_default();
     let matrix_columns = numeric_columns.iter().take(6).cloned().collect::<Vec<_>>();
 
@@ -278,7 +280,6 @@ pub fn suggest_fields(
         },
         VisualizationChartType::Bar
         | VisualizationChartType::Pie
-        | VisualizationChartType::Radar
         | VisualizationChartType::Funnel => VisualizationFieldSuggestion {
             title,
             x_label: choose_label(&best_dimension, "分类"),
@@ -473,21 +474,6 @@ fn build_plots(payload: &VisualizationPayload, request: &VisualizationRequest) -
             }
             Plot::Lollipop(plot)
         }
-        (VisualizationChartType::Radar, VisualizationPayload::CategoryValues(items)) => {
-            let axes = items.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>();
-            let values = items.iter().map(|(_, value)| *value).collect::<Vec<_>>();
-            let upper = request
-                .radar_max
-                .max(values.iter().copied().reduce(f64::max).unwrap_or(1.0));
-            let mut plot = RadarPlot::new(axes)
-                .with_series_labeled(values, request.title.trim().if_empty("Series"))
-                .with_range(0.0, upper)
-                .with_legend(false);
-            if request.filled {
-                plot = plot.with_filled(true).with_opacity(0.25);
-            }
-            Plot::Radar(plot)
-        }
         (VisualizationChartType::Funnel, VisualizationPayload::CategoryValues(items)) => {
             let mut plot = FunnelPlot::new();
             for (label, value) in items {
@@ -505,7 +491,12 @@ fn build_plots(payload: &VisualizationPayload, request: &VisualizationRequest) -
 }
 
 fn build_layout(plots: &[Plot], request: &VisualizationRequest) -> Layout {
-    let mut layout = Layout::auto_from_plots(plots);
+    let mut layout = Layout::auto_from_plots(plots)
+        .with_font_family(CJK_FONT_STACK)
+        .with_title_size(18)
+        .with_label_size(14)
+        .with_tick_size(12)
+        .with_body_size(12);
     if !request.title.trim().is_empty() {
         layout = layout.with_title(request.title.trim());
     }
@@ -530,7 +521,6 @@ fn build_payload(dataset: &DataTable, request: &VisualizationRequest) -> Result<
         }
         VisualizationChartType::Bar
         | VisualizationChartType::Pie
-        | VisualizationChartType::Radar
         | VisualizationChartType::Funnel => {
             let category_column = required_name(&request.category_column, "分类字段")?;
             let value_column = required_name(&request.value_column, "数值字段")?;
@@ -880,18 +870,4 @@ fn palette_color(theme: &VisualizationColorTheme, index: usize) -> &'static str 
         VisualizationColorTheme::Violet => &violet,
     };
     palette[index % palette.len()]
-}
-
-trait IfEmpty<'a> {
-    fn if_empty(self, fallback: &'a str) -> &'a str;
-}
-
-impl<'a> IfEmpty<'a> for &'a str {
-    fn if_empty(self, fallback: &'a str) -> &'a str {
-        if self.trim().is_empty() {
-            fallback
-        } else {
-            self
-        }
-    }
 }

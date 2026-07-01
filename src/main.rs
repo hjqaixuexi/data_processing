@@ -4,6 +4,7 @@ pub mod app;
 pub mod model;
 
 mod exporter;
+mod fusion;
 mod inspector;
 mod loader;
 mod pipeline;
