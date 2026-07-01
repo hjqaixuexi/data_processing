@@ -9,6 +9,10 @@ use crate::model::{
 };
 use crate::pipeline;
 use crate::processor;
+use crate::visualization::{
+    self, VisualizationChartType, VisualizationFieldSuggestion, VisualizationReport,
+    VisualizationRequest,
+};
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use std::path::Path;
@@ -18,6 +22,7 @@ pub struct AppService {
     datasets: Vec<DatasetRecord>,
     pub selected_dataset_id: Option<i32>,
     last_join_report: Option<JoinReport>,
+    last_visualization_preview: Option<VisualizationReport>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +42,7 @@ impl AppService {
             datasets: Vec::new(),
             selected_dataset_id: None,
             last_join_report: None,
+            last_visualization_preview: None,
         }
     }
 
@@ -50,6 +56,7 @@ impl AppService {
         if let Some(last) = imported.last() {
             self.selected_dataset_id = Some(*last);
         }
+        self.invalidate_visualization_preview();
 
         Ok(format!("已导入 {} 个数据集", imported.len()))
     }
@@ -108,6 +115,10 @@ impl AppService {
         self.last_join_report.as_ref()
     }
 
+    pub fn last_visualization_preview(&self) -> Option<&VisualizationReport> {
+        self.last_visualization_preview.as_ref()
+    }
+
     pub fn can_undo(&self) -> bool {
         self.selected_dataset()
             .map(|record| !record.undo_stack.is_empty())
@@ -123,6 +134,7 @@ impl AppService {
     pub fn select_dataset(&mut self, dataset_id: i32) -> Result<()> {
         if self.datasets.iter().any(|record| record.id == dataset_id) {
             self.selected_dataset_id = Some(dataset_id);
+            self.invalidate_visualization_preview();
             Ok(())
         } else {
             bail!("未找到数据集: {dataset_id}")
@@ -144,8 +156,35 @@ impl AppService {
             let next_index = current_index.min(self.datasets.len().saturating_sub(1));
             Some(self.datasets[next_index].id)
         };
+        self.invalidate_visualization_preview();
 
         Ok(format!("已删除数据集：{}", removed.dataset_name))
+    }
+
+    pub fn suggest_visualization_fields(&self, chart_type: &str) -> Result<VisualizationFieldSuggestion> {
+        let record = self.selected_dataset().context("当前没有选中数据集")?;
+        Ok(visualization::suggest_fields(
+            &record.dataset_name,
+            &record.working_table,
+            &VisualizationChartType::from_text(chart_type),
+        ))
+    }
+
+    pub fn render_visualization_preview(&mut self, request: VisualizationRequest) -> Result<String> {
+        let record = self.selected_dataset().context("当前没有选中数据集")?;
+        let report = visualization::render_preview(&record.working_table, &request)?;
+        let status = format!("图表预览已更新：{} | {}", report.chart_name, report.summary);
+        self.last_visualization_preview = Some(report);
+        Ok(status)
+    }
+
+    pub fn export_visualization(&self, request: VisualizationRequest, path: &Path) -> Result<String> {
+        let record = self.selected_dataset().context("当前没有选中数据集")?;
+        let report = visualization::export_chart(&record.working_table, &request, path)?;
+        Ok(format!(
+            "已导出图表：{} | {} | {}",
+            report.chart_name, report.output_format, report.output_path
+        ))
     }
 
     pub fn inspect_selected(&mut self) -> Result<String> {
@@ -160,10 +199,13 @@ impl AppService {
 
         record.redo_stack.push(Self::capture_history(record));
         Self::restore_history(record, previous)?;
+        let row_count = record.working_table.height();
+        let column_count = record.working_table.width();
+        self.invalidate_visualization_preview();
         Ok(format!(
             "已撤销，当前工作表 {} 行 {} 列",
-            record.working_table.height(),
-            record.working_table.width()
+            row_count,
+            column_count
         ))
     }
 
@@ -175,10 +217,13 @@ impl AppService {
 
         record.undo_stack.push(Self::capture_history(record));
         Self::restore_history(record, next)?;
+        let row_count = record.working_table.height();
+        let column_count = record.working_table.width();
+        self.invalidate_visualization_preview();
         Ok(format!(
             "已重做，当前工作表 {} 行 {} 列",
-            record.working_table.height(),
-            record.working_table.width()
+            row_count,
+            column_count
         ))
     }
 
@@ -1144,6 +1189,7 @@ impl AppService {
         });
 
         self.selected_dataset_id = Some(dataset_id);
+        self.invalidate_visualization_preview();
         Ok(format!(
             "已生成融合数据集：左表 {} + 右表 {}",
             left.dataset_name, right.dataset_name
@@ -1192,6 +1238,7 @@ impl AppService {
         record.working_table = record.source_table.clone();
         record.pipeline_steps.clear();
         self.refresh_selected_record()?;
+        self.invalidate_visualization_preview();
 
         for operation in template.operations {
             let description = operation.to_string();
@@ -1266,6 +1313,7 @@ impl AppService {
         record.redo_stack.clear();
         record.working_table = next;
         self.refresh_selected_record()?;
+        self.invalidate_visualization_preview();
 
         let record = self.selected_dataset_mut()?;
         record.pipeline_steps.push(pipeline::build_step(
@@ -1308,6 +1356,10 @@ impl AppService {
         record.frame = record.working_table.to_frame()?;
         record.profile = inspector::build_profile(&record.working_table, &record.quality_rules);
         Ok(())
+    }
+
+    fn invalidate_visualization_preview(&mut self) {
+        self.last_visualization_preview = None;
     }
 }
 

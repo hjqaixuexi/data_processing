@@ -4,9 +4,13 @@ use crate::model::{
     TimeDiffUnit, page_window,
 };
 use crate::service::AppService;
+use crate::visualization::{
+    self, VisualizationChartType, VisualizationColorTheme, VisualizationFieldSuggestion,
+    VisualizationMarkerShape, VisualizationOutputFormat, VisualizationRequest,
+};
 use anyhow::Result;
 use rfd::FileDialog;
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Image, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -919,6 +923,61 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
     });
 
     let weak = ui.as_weak();
+    ui.global::<Logic>().on_autofill_visualization({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                let status = match service
+                    .suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
+                {
+                    Ok(suggestion) => {
+                        apply_visualization_suggestion(&form, &suggestion, true);
+                        "已根据当前数据集自动识别图表字段".to_string()
+                    }
+                    Err(error) => format!("字段识别失败：{error:#}"),
+                };
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_render_visualization_preview({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                autofill_visualization_if_needed(service, &form);
+                let request = build_visualization_request(&form);
+                let status = service
+                    .render_visualization_preview(request)
+                    .unwrap_or_else(|error| format!("图表预览失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.global::<Logic>().on_export_visualization({
+        let service = service.clone();
+        move || {
+            with_ui(&weak, &service, |ui, service| {
+                let form = ui.global::<FormState>();
+                autofill_visualization_if_needed(service, &form);
+                let request = build_visualization_request(&form);
+                let extension = request.output_format.extension().to_string();
+                let title = format!("导出{}", request.chart_type.as_str());
+                let status = export_with_dialog(&title, &extension, |path| {
+                    service.export_visualization(request, &path)
+                })
+                .unwrap_or_else(|error| format!("图表导出失败：{error:#}"));
+                refresh_ui(ui, service, &status);
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
     ui.global::<Logic>().on_export_csv({
         let service = service.clone();
         move || {
@@ -1053,6 +1112,44 @@ fn run_simple_action<F>(
     });
 }
 
+fn build_string_model(values: Vec<String>) -> ModelRc<SharedString> {
+    let options = if values.is_empty() {
+        vec![SharedString::from("未选择")]
+    } else {
+        values
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>()
+    };
+    ModelRc::new(VecModel::from(options))
+}
+
+fn visualization_all_columns(record: &DatasetRecord) -> Vec<String> {
+    record.working_table.column_names()
+}
+
+fn visualization_numeric_columns(record: &DatasetRecord) -> Vec<String> {
+    record
+        .working_table
+        .columns
+        .iter()
+        .filter(|column| matches!(column.logical_type, LogicalType::Integer | LogicalType::Float))
+        .map(|column| column.name.clone())
+        .collect()
+}
+
+fn load_visualization_preview_image(service: &AppService) -> Image {
+    if service.last_visualization_preview().is_some() {
+        let path = visualization::preview_image_path();
+        if path.exists() {
+            if let Ok(image) = Image::load_from_path(&path) {
+                return image;
+            }
+        }
+    }
+    Image::default()
+}
+
 fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
     let state = ui.global::<AppState>();
     let form = ui.global::<FormState>();
@@ -1120,6 +1217,11 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
                     .unwrap_or_default()
                     .into(),
             );
+            if let Ok(suggestion) =
+                service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
+            {
+                apply_visualization_suggestion(&form, &suggestion, true);
+            }
         }
 
         let preview_size = parse_bounded_usize(&form.get_preview_row_count().to_string(), 20, 1, 200);
@@ -1192,6 +1294,28 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_can_undo(service.can_undo());
         state.set_can_redo(service.can_redo());
         state.set_join_target_hint(service.join_target_hint().into());
+        state.set_visualization_all_columns(build_string_model(visualization_all_columns(record)));
+        state.set_visualization_numeric_columns(build_string_model(visualization_numeric_columns(record)));
+        if let Ok(suggestion) =
+            service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
+        {
+            state.set_visualization_suggestion_summary(suggestion.summary.into());
+        } else {
+            state.set_visualization_suggestion_summary("无法生成图表字段建议".into());
+        }
+        if let Some(report) = service.last_visualization_preview() {
+            state.set_visualization_preview_image(load_visualization_preview_image(service));
+            state.set_visualization_preview_summary(report.summary.clone().into());
+            state.set_visualization_preview_path(
+                format!("{} | {}", report.output_format, report.output_path).into(),
+            );
+        } else {
+            state.set_visualization_preview_image(Image::default());
+            state.set_visualization_preview_summary(
+                "尚未生成预览，先识别字段再刷新图像。预览文件会写入 target/visualization_preview。".into(),
+            );
+            state.set_visualization_preview_path("无可用图像".into());
+        }
 
         state.set_metrics(ModelRc::new(VecModel::from(build_metrics(record))));
         state.set_columns(ModelRc::new(VecModel::from(fields.rows)));
@@ -1290,6 +1414,15 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         form.set_quality_text_column(SharedString::new());
         form.set_quality_max_length(SharedString::new());
         form.set_quality_time_gap_minutes(SharedString::new());
+        form.set_visualization_title(SharedString::new());
+        form.set_visualization_x_label(SharedString::new());
+        form.set_visualization_y_label(SharedString::new());
+        form.set_visualization_x_column(SharedString::new());
+        form.set_visualization_y_column(SharedString::new());
+        form.set_visualization_category_column(SharedString::new());
+        form.set_visualization_value_column(SharedString::new());
+        form.set_visualization_group_column(SharedString::new());
+        form.set_visualization_matrix_columns(SharedString::new());
         state.set_quality_rule_summary(
             "主键 [未识别] | 组合键 [未设置] | 时间列 [未识别] | 缺失阈值 [30%] | 数值范围 [未设置] | 文本长度 [未设置] | 时间间隔 [未设置]"
                 .into(),
@@ -1308,6 +1441,12 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_can_undo(false);
         state.set_can_redo(false);
         state.set_join_target_hint("当前没有可融合的目标数据集".into());
+        state.set_visualization_all_columns(build_string_model(Vec::new()));
+        state.set_visualization_numeric_columns(build_string_model(Vec::new()));
+        state.set_visualization_suggestion_summary("导入并选中数据集后自动识别可视化字段".into());
+        state.set_visualization_preview_image(Image::default());
+        state.set_visualization_preview_summary("尚未生成预览".into());
+        state.set_visualization_preview_path("无可用图像".into());
         state.set_metrics(ModelRc::new(VecModel::from(Vec::<MetricCardData>::new())));
         state.set_columns(ModelRc::new(VecModel::from(Vec::<ColumnRowData>::new())));
         state.set_preview_rows(ModelRc::new(VecModel::from(Vec::<PreviewRowData>::new())));
@@ -1404,6 +1543,139 @@ fn parse_priority_placement(value: &str) -> PriorityPlacement {
 
 fn parse_adjacent_compare_mode(value: &str) -> AdjacentCompareMode {
     AdjacentCompareMode::from_text(value)
+}
+
+fn build_visualization_request(form: &FormState) -> VisualizationRequest {
+    VisualizationRequest {
+        chart_type: VisualizationChartType::from_text(&form.get_visualization_chart_type().to_string()),
+        output_format: VisualizationOutputFormat::from_text(
+            &form.get_visualization_output_format().to_string(),
+        ),
+        title: form.get_visualization_title().to_string(),
+        x_label: form.get_visualization_x_label().to_string(),
+        y_label: form.get_visualization_y_label().to_string(),
+        color_theme: VisualizationColorTheme::from_text(
+            &form.get_visualization_color_theme().to_string(),
+        ),
+        marker_shape: VisualizationMarkerShape::from_text(
+            &form.get_visualization_marker_shape().to_string(),
+        ),
+        line_width: parse_f64_or_default(&form.get_visualization_line_width().to_string(), 2.0),
+        point_size: parse_f64_or_default(&form.get_visualization_point_size().to_string(), 6.0),
+        histogram_bins: parse_bounded_usize(
+            &form.get_visualization_histogram_bins().to_string(),
+            12,
+            1,
+            100,
+        ),
+        radar_max: parse_f64_or_default(&form.get_visualization_radar_max().to_string(), 1.0),
+        filled: form.get_visualization_filled(),
+        x_column: form.get_visualization_x_column().to_string(),
+        y_column: form.get_visualization_y_column().to_string(),
+        category_column: form.get_visualization_category_column().to_string(),
+        value_column: form.get_visualization_value_column().to_string(),
+        group_column: form.get_visualization_group_column().to_string(),
+        matrix_columns: split_csv_like(&form.get_visualization_matrix_columns().to_string()),
+    }
+}
+
+fn autofill_visualization_if_needed(service: &AppService, form: &FormState) {
+    if let Ok(suggestion) = service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string()) {
+        apply_visualization_suggestion(form, &suggestion, false);
+    }
+}
+
+fn apply_visualization_suggestion(
+    form: &FormState,
+    suggestion: &VisualizationFieldSuggestion,
+    overwrite_all: bool,
+) {
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_title().to_string(),
+        &suggestion.title,
+        |value| form.set_visualization_title(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_x_label().to_string(),
+        &suggestion.x_label,
+        |value| form.set_visualization_x_label(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_y_label().to_string(),
+        &suggestion.y_label,
+        |value| form.set_visualization_y_label(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_x_column().to_string(),
+        &suggestion.x_column,
+        |value| form.set_visualization_x_column(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_y_column().to_string(),
+        &suggestion.y_column,
+        |value| form.set_visualization_y_column(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_category_column().to_string(),
+        &suggestion.category_column,
+        |value| form.set_visualization_category_column(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_value_column().to_string(),
+        &suggestion.value_column,
+        |value| form.set_visualization_value_column(value.into()),
+    );
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_group_column().to_string(),
+        &suggestion.group_column,
+        |value| form.set_visualization_group_column(value.into()),
+    );
+
+    let matrix_value = suggestion.matrix_columns.join(", ");
+    set_visualization_field(
+        form,
+        overwrite_all,
+        &form.get_visualization_matrix_columns().to_string(),
+        &matrix_value,
+        |value| form.set_visualization_matrix_columns(value.into()),
+    );
+}
+
+fn set_visualization_field<F>(
+    _form: &FormState,
+    overwrite_all: bool,
+    current_value: &str,
+    suggested_value: &str,
+    setter: F,
+) where
+    F: FnOnce(&str),
+{
+    if suggested_value.trim().is_empty() {
+        if overwrite_all {
+            setter("");
+        }
+        return;
+    }
+
+    if overwrite_all || current_value.trim().is_empty() || current_value.trim() == "未选择" {
+        setter(suggested_value);
+    }
 }
 
 fn parse_sort_directions(value: &str, width: usize) -> Vec<bool> {

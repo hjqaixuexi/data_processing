@@ -95,6 +95,12 @@ export global AppState {
     in property <string> join-unmatched-summary;
     in property <string> join-conflict-summary;
     in property <string> join-loss-summary;
+    in property <[string]> visualization-all-columns;
+    in property <[string]> visualization-numeric-columns;
+    in property <image> visualization-preview-image;
+    in property <string> visualization-preview-summary;
+    in property <string> visualization-preview-path;
+    in property <string> visualization-suggestion-summary;
 }
 
 export global FormState {
@@ -221,6 +227,24 @@ export global FormState {
     in-out property <string> derive-window-size: "3";
     in-out property <string> derive-window-function: "求和";
     in-out property <string> derive-window-compare-mode: "差值";
+    in-out property <string> visualization-chart-type: "折线图";
+    in-out property <string> visualization-output-format: "SVG";
+    in-out property <string> visualization-title;
+    in-out property <string> visualization-x-label;
+    in-out property <string> visualization-y-label;
+    in-out property <string> visualization-color-theme: "工程蓝";
+    in-out property <string> visualization-marker-shape: "圆点";
+    in-out property <string> visualization-line-width: "2";
+    in-out property <string> visualization-point-size: "6";
+    in-out property <string> visualization-histogram-bins: "12";
+    in-out property <string> visualization-radar-max: "100";
+    in-out property <bool> visualization-filled: true;
+    in-out property <string> visualization-x-column;
+    in-out property <string> visualization-y-column;
+    in-out property <string> visualization-category-column;
+    in-out property <string> visualization-value-column;
+    in-out property <string> visualization-group-column;
+    in-out property <string> visualization-matrix-columns;
 }
 
 export global Logic {
@@ -268,6 +292,9 @@ export global Logic {
     callback apply-derive-window();
     callback apply-recommended-mapping();
     callback apply-join();
+    callback autofill-visualization();
+    callback render-visualization-preview();
+    callback export-visualization();
     callback export-csv();
     callback export-tsv();
     callback export-txt();

@@ -529,9 +529,15 @@ export component MainWindow inherits Window {
                         }
 
                         TabButton {
-                            label: "处理流程记录";
+                            label: "数据可视化";
                             selected: root.active-tab == 5;
                             pressed => { root.active-tab = 5; }
+                        }
+
+                        TabButton {
+                            label: "处理流程记录";
+                            selected: root.active-tab == 6;
+                            pressed => { root.active-tab = 6; }
                         }
                     }
 
@@ -2637,8 +2643,311 @@ export component MainWindow inherits Window {
                                 }
                             }
 
+                            if root.active-tab == 5 : Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                background: AppTheme.window-bg;
+
+                                HorizontalBox {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 8px;
+
+                                    Panel {
+                                        width: 438px;
+                                        title: "图表配置";
+                                        subtitle: "图表类型统一放在下拉框中，字段可自动识别。";
+
+                                        ScrollView {
+                                            min-height: 0px;
+                                            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                            vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                            viewport-width: self.visible-width;
+
+                                            VerticalBox {
+                                                spacing: 8px;
+
+                                                Panel {
+                                                    title: "通用设置";
+                                                    subtitle: "";
+
+                                                    VerticalBox {
+                                                        spacing: 6px;
+
+                                                        HorizontalBox {
+                                                            spacing: 6px;
+
+                                                            LabeledChoice {
+                                                                width: 180px;
+                                                                label: "图表类型";
+                                                                model: [
+                                                                    "折线图",
+                                                                    "面积图",
+                                                                    "散点图",
+                                                                    "柱状图",
+                                                                    "直方图",
+                                                                    "饼图",
+                                                                    "箱线图",
+                                                                    "小提琴图",
+                                                                    "棒棒糖图",
+                                                                    "雷达图",
+                                                                    "漏斗图",
+                                                                    "热力图"
+                                                                ];
+                                                                value <=> FormState.visualization-chart-type;
+                                                            }
+
+                                                            LabeledChoice {
+                                                                width: 120px;
+                                                                label: "导出格式";
+                                                                model: ["SVG", "PNG", "PDF"];
+                                                                value <=> FormState.visualization-output-format;
+                                                            }
+                                                        }
+
+                                                        LabeledField {
+                                                            label: "标题";
+                                                            placeholder: "例如：设备温度趋势图";
+                                                            text <=> FormState.visualization-title;
+                                                        }
+
+                                                        HorizontalBox {
+                                                            spacing: 6px;
+
+                                                            LabeledField {
+                                                                width: 180px;
+                                                                label: "X 轴标签";
+                                                                placeholder: "自动识别";
+                                                                text <=> FormState.visualization-x-label;
+                                                            }
+
+                                                            LabeledField {
+                                                                width: 180px;
+                                                                label: "Y 轴标签";
+                                                                placeholder: "自动识别";
+                                                                text <=> FormState.visualization-y-label;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Panel {
+                                                    title: "字段映射";
+                                                    subtitle: "";
+
+                                                    VerticalBox {
+                                                        spacing: 6px;
+
+                                                        LabeledChoice {
+                                                            label: "X / 分类字段";
+                                                            model: AppState.visualization-all-columns;
+                                                            value <=> FormState.visualization-x-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            label: "Y / 数值字段";
+                                                            model: AppState.visualization-numeric-columns;
+                                                            value <=> FormState.visualization-y-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            label: "分类字段";
+                                                            model: AppState.visualization-all-columns;
+                                                            value <=> FormState.visualization-category-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            label: "数值字段";
+                                                            model: AppState.visualization-numeric-columns;
+                                                            value <=> FormState.visualization-value-column;
+                                                        }
+
+                                                        LabeledChoice {
+                                                            label: "分组字段";
+                                                            model: AppState.visualization-all-columns;
+                                                            value <=> FormState.visualization-group-column;
+                                                        }
+
+                                                        LabeledField {
+                                                            label: "热力字段";
+                                                            placeholder: "多个数值字段用逗号分隔";
+                                                            text <=> FormState.visualization-matrix-columns;
+                                                        }
+                                                    }
+                                                }
+
+                                                Panel {
+                                                    title: "样式参数";
+                                                    subtitle: "";
+
+                                                    VerticalBox {
+                                                        spacing: 6px;
+
+                                                        HorizontalBox {
+                                                            spacing: 6px;
+
+                                                            LabeledChoice {
+                                                                width: 140px;
+                                                                label: "配色";
+                                                                model: ["工程蓝", "信号红", "过程绿", "琥珀橙", "紫罗兰"];
+                                                                value <=> FormState.visualization-color-theme;
+                                                            }
+
+                                                            LabeledChoice {
+                                                                width: 140px;
+                                                                label: "点形状";
+                                                                model: ["圆点", "方块", "三角", "菱形", "十字", "加号"];
+                                                                value <=> FormState.visualization-marker-shape;
+                                                            }
+                                                        }
+
+                                                        HorizontalBox {
+                                                            spacing: 6px;
+
+                                                            LabeledField {
+                                                                width: 120px;
+                                                                label: "线宽";
+                                                                placeholder: "2";
+                                                                text <=> FormState.visualization-line-width;
+                                                            }
+
+                                                            LabeledField {
+                                                                width: 120px;
+                                                                label: "点大小";
+                                                                placeholder: "6";
+                                                                text <=> FormState.visualization-point-size;
+                                                            }
+
+                                                            LabeledField {
+                                                                width: 120px;
+                                                                label: "分箱";
+                                                                placeholder: "12";
+                                                                text <=> FormState.visualization-histogram-bins;
+                                                            }
+                                                        }
+
+                                                        HorizontalBox {
+                                                            spacing: 6px;
+
+                                                            LabeledField {
+                                                                width: 120px;
+                                                                label: "雷达上限";
+                                                                placeholder: "100";
+                                                                text <=> FormState.visualization-radar-max;
+                                                            }
+
+                                                            InlineToggleButton {
+                                                                width: 88px;
+                                                                label: "填充";
+                                                                checked <=> FormState.visualization-filled;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Panel {
+                                                    title: "字段建议";
+                                                    subtitle: "";
+
+                                                    VerticalBox {
+                                                        spacing: 6px;
+
+                                                        Text {
+                                                            text: AppState.visualization-suggestion-summary;
+                                                            color: AppTheme.text-soft;
+                                                            font-size: 10px;
+                                                            wrap: word-wrap;
+                                                        }
+
+                                                        HorizontalBox {
+                                                            spacing: 6px;
+
+                                                            Button {
+                                                                text: "识别字段";
+                                                                height: 30px;
+                                                                clicked => { Logic.autofill-visualization(); }
+                                                            }
+
+                                                            Button {
+                                                                text: "刷新预览";
+                                                                primary: true;
+                                                                height: 30px;
+                                                                clicked => { Logic.render-visualization-preview(); }
+                                                            }
+
+                                                            Button {
+                                                                text: "导出图表";
+                                                                height: 30px;
+                                                                clicked => { Logic.export-visualization(); }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle { height: 16px; }
+                                            }
+                                        }
+                                    }
+
+                                    Panel {
+                                        horizontal-stretch: 1;
+                                        title: "图像预览";
+                                        subtitle: "右侧显示本地生成的 PNG 预览；导出时可保存为 SVG、PNG、PDF。";
+
+                                        VerticalBox {
+                                            spacing: 8px;
+
+                                            InfoCard {
+                                                horizontal-stretch: 1;
+                                                card-min-height: 62px;
+                                                title: "预览摘要";
+                                                value: AppState.visualization-preview-summary;
+                                            }
+
+                                            InfoCard {
+                                                horizontal-stretch: 1;
+                                                card-min-height: 54px;
+                                                title: "预览文件";
+                                                value: AppState.visualization-preview-path;
+                                            }
+
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                                vertical-stretch: 1;
+                                                min-width: 0px;
+                                                min-height: 0px;
+                                                background: AppTheme.panel-muted;
+                                                border-width: 1px;
+                                                border-color: AppTheme.border;
+                                                border-radius: 4px;
+                                                clip: true;
+
+                                                if AppState.visualization-preview-path != "无可用图像": Image {
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    source: AppState.visualization-preview-image;
+                                                    image-fit: contain;
+                                                }
+
+                                                if AppState.visualization-preview-path == "无可用图像": Text {
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    text: "暂无预览图像\n先识别字段，再刷新预览。";
+                                                    color: AppTheme.text-soft;
+                                                    font-size: 12px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             pipeline-page := Rectangle {
-                                visible: root.active-tab == 5;
+                                visible: root.active-tab == 6;
                                 x: 0px;
                                 y: 0px;
                                 width: parent.width;
