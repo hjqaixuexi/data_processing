@@ -62,15 +62,6 @@ export struct JoinSuggestionData {
     reason: string,
 }
 
-export struct FusionHintData {
-    dataset-id: string,
-    dataset-name: string,
-    role-hint: string,
-    object-hint: string,
-    time-hint: string,
-    note: string,
-}
-
 export global AppState {
     in property <[DatasetCardData]> datasets;
     in property <[MetricCardData]> metrics;
@@ -81,7 +72,6 @@ export global AppState {
     in property <[StepRowData]> steps;
     in property <[MappingRowData]> mappings;
     in property <[JoinSuggestionData]> join-suggestions;
-    in property <[FusionHintData]> fusion-hints;
     in property <string> current-dataset-name;
     in property <string> current-dataset-overview;
     in property <string> quality-summary;
@@ -164,19 +154,15 @@ export global FormState {
     in-out property <string> fusion-secondary-dataset-ids;
     in-out property <string> fusion-object-keys;
     in-out property <string> fusion-time-column;
-    in-out property <string> fusion-alignment-mode: "按最近邻对齐";
+    in-out property <string> fusion-alignment-mode: "精确优先，最近邻兜底";
     in-out property <string> fusion-time-window-seconds: "5";
     in-out property <string> fusion-resample-seconds: "60";
     in-out property <string> fusion-missing-strategy: "保持空值并标记";
     in-out property <string> fusion-strategy: "主源优先";
     in-out property <string> fusion-outlier-zscore: "3.5";
-    in-out property <string> fusion-alert-threshold: "70";
     in-out property <bool> fusion-deduplicate-packets: true;
     in-out property <bool> fusion-clean-outliers: true;
     in-out property <bool> fusion-score-quality: true;
-    in-out property <bool> fusion-generate-features: true;
-    in-out property <bool> fusion-generate-events: true;
-    in-out property <bool> fusion-generate-alerts: true;
     in-out property <string> filter-column;
     in-out property <string> filter-keyword;
     in-out property <string> range-start: "1";
@@ -323,7 +309,6 @@ export global Logic {
     callback apply-derive-window();
     callback apply-recommended-mapping();
     callback apply-join();
-    callback autofill-fusion();
     callback apply-fusion();
     callback autofill-visualization();
     callback render-visualization-preview();

@@ -1,6 +1,4 @@
-﻿use crate::fusion::{
-    FusionAlignmentMode, FusionDefaults, FusionMissingStrategy, FusionRequest, FusionStrategy,
-};
+﻿use crate::fusion::{FusionAlignmentMode, FusionMissingStrategy, FusionRequest, FusionStrategy};
 use crate::model::{
     AdjacentCompareMode, AggregateFunction, CompareOperator, DatasetRecord, JoinConflictStrategy,
     JoinKind, LogicalType, PreviewRow, PriorityPlacement, StatisticFillStrategy, TextCaseMode,
@@ -25,7 +23,11 @@ pub fn run() -> Result<(), slint::PlatformError> {
     let service = Rc::new(RefCell::new(AppService::new()));
 
     install_callbacks(&ui, service);
-    refresh_ui(&ui, &AppService::new(), "等待导入 xlsx / csv / tsv / txt 数据集");
+    refresh_ui(
+        &ui,
+        &AppService::new(),
+        "等待导入 xlsx / csv / tsv / txt 数据集",
+    );
     ui.run()
 }
 
@@ -186,7 +188,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let status = service.undo().unwrap_or_else(|error| format!("撤销失败：{error:#}"));
+                let status = service
+                    .undo()
+                    .unwrap_or_else(|error| format!("撤销失败：{error:#}"));
                 refresh_ui(ui, service, &status);
             });
         }
@@ -197,7 +201,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let status = service.redo().unwrap_or_else(|error| format!("重做失败：{error:#}"));
+                let status = service
+                    .redo()
+                    .unwrap_or_else(|error| format!("重做失败：{error:#}"));
                 refresh_ui(ui, service, &status);
             });
         }
@@ -218,9 +224,12 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
     install_zero_arg_action(ui, service.clone(), "on_deduplicate_rows", |service| {
         service.deduplicate_rows()
     });
-    install_zero_arg_action(ui, service.clone(), "on_apply_recommended_mapping", |service| {
-        service.apply_recommended_mapping()
-    });
+    install_zero_arg_action(
+        ui,
+        service.clone(),
+        "on_apply_recommended_mapping",
+        |service| service.apply_recommended_mapping(),
+    );
 
     let weak = ui.as_weak();
     ui.global::<Logic>().on_apply_row_operation({
@@ -246,21 +255,23 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         parse_usize_or_default(&form.get_range_start().to_string(), 1),
                         parse_usize_or_default(&form.get_range_end().to_string(), 1),
                     ),
-                    "保留前N行" => service.keep_top_rows(
-                        parse_usize_or_default(&form.get_top_row_count().to_string(), 100),
-                    ),
-                    "抽样N行" => service.sample_rows(
-                        parse_usize_or_default(&form.get_sample_row_count().to_string(), 50),
-                    ),
-                    "保留缺失记录" => {
-                        service.keep_rows_with_missing(split_csv_like(&form.get_missing_columns().to_string()))
-                    }
-                    "删除缺失记录" => {
-                        service.drop_rows_with_missing(split_csv_like(&form.get_missing_columns().to_string()))
-                    }
-                    "按列去重" => {
-                        service.deduplicate_by_columns(split_csv_like(&form.get_row_key_columns().to_string()))
-                    }
+                    "保留前N行" => service.keep_top_rows(parse_usize_or_default(
+                        &form.get_top_row_count().to_string(),
+                        100,
+                    )),
+                    "抽样N行" => service.sample_rows(parse_usize_or_default(
+                        &form.get_sample_row_count().to_string(),
+                        50,
+                    )),
+                    "保留缺失记录" => service.keep_rows_with_missing(split_csv_like(
+                        &form.get_missing_columns().to_string(),
+                    )),
+                    "删除缺失记录" => service.drop_rows_with_missing(split_csv_like(
+                        &form.get_missing_columns().to_string(),
+                    )),
+                    "按列去重" => service.deduplicate_by_columns(split_csv_like(
+                        &form.get_row_key_columns().to_string(),
+                    )),
                     "整表去重" => service.deduplicate_rows(),
                     _ => service.drop_empty_rows(),
                 }
@@ -282,18 +293,19 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         &form.get_rename_from().to_string(),
                         &form.get_rename_to().to_string(),
                     ),
-                    "保留列" => service.keep_columns(split_csv_like(&form.get_column_list().to_string())),
-                    "删除列" => service.drop_columns(split_csv_like(&form.get_column_list().to_string())),
+                    "保留列" => {
+                        service.keep_columns(split_csv_like(&form.get_column_list().to_string()))
+                    }
+                    "删除列" => {
+                        service.drop_columns(split_csv_like(&form.get_column_list().to_string()))
+                    }
                     "删除空列" => service.drop_empty_columns(),
-                    "调整列顺序" => {
-                        service.reorder_columns(split_csv_like(&form.get_column_order_list().to_string()))
-                    }
-                    "列名前缀" => {
-                        service.add_column_name_affix(&form.get_column_name_prefix().to_string(), "")
-                    }
-                    "列名后缀" => {
-                        service.add_column_name_affix("", &form.get_column_name_suffix().to_string())
-                    }
+                    "调整列顺序" => service
+                        .reorder_columns(split_csv_like(&form.get_column_order_list().to_string())),
+                    "列名前缀" => service
+                        .add_column_name_affix(&form.get_column_name_prefix().to_string(), ""),
+                    "列名后缀" => service
+                        .add_column_name_affix("", &form.get_column_name_suffix().to_string()),
                     "复制列" => service.duplicate_column(
                         &form.get_copy_source_column().to_string(),
                         &form.get_copy_target_column().to_string(),
@@ -336,7 +348,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         &form.get_replace_from().to_string(),
                         &form.get_replace_to().to_string(),
                     ),
-                    "压缩空白" => service.squeeze_text_whitespace(&form.get_text_column().to_string()),
+                    "压缩空白" => {
+                        service.squeeze_text_whitespace(&form.get_text_column().to_string())
+                    }
                     "移除指定字符" => service.remove_text_pattern(
                         &form.get_text_column().to_string(),
                         &form.get_text_remove_pattern().to_string(),
@@ -349,7 +363,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         &form.get_text_column().to_string(),
                         &form.get_text_delimiter().to_string(),
                     ),
-                    "仅保留数字" => service.keep_digits_only(&form.get_text_column().to_string()),
+                    "仅保留数字" => {
+                        service.keep_digits_only(&form.get_text_column().to_string())
+                    }
                     "添加前后缀" => service.add_text_affix(
                         &form.get_text_column().to_string(),
                         &form.get_text_prefix().to_string(),
@@ -375,23 +391,39 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                 let form = ui.global::<FormState>();
                 let operation = form.get_value_operation().to_string();
                 let status = match operation.as_str() {
-                    "前值填充" => service.fill_null_forward(&form.get_fill_column().to_string()),
-                    "后值填充" => service.fill_null_backward(&form.get_fill_column().to_string()),
+                    "前值填充" => {
+                        service.fill_null_forward(&form.get_fill_column().to_string())
+                    }
+                    "后值填充" => {
+                        service.fill_null_backward(&form.get_fill_column().to_string())
+                    }
                     "统计值填充" => service.fill_null_statistic(
                         &form.get_stat_fill_column().to_string(),
-                        StatisticFillStrategy::from_text(&form.get_stat_fill_strategy().to_string()),
+                        StatisticFillStrategy::from_text(
+                            &form.get_stat_fill_strategy().to_string(),
+                        ),
                     ),
-                    "空字符串转空值" => service.empty_string_to_null(&form.get_fill_column().to_string()),
+                    "空字符串转空值" => {
+                        service.empty_string_to_null(&form.get_fill_column().to_string())
+                    }
                     "零值转空值" => service.zero_to_null(&form.get_fill_column().to_string()),
                     "指定值替换" => service.replace_exact_value(
                         &form.get_value_replace_column().to_string(),
                         &form.get_value_replace_from().to_string(),
                         &form.get_value_replace_to().to_string(),
                     ),
-                    "字符串转数值" => service.convert_string_to_numeric(&form.get_cast_column().to_string()),
-                    "字符串转日期" => service.convert_string_to_datetime(&form.get_cast_column().to_string()),
-                    "整型转浮点" => service.convert_integer_to_float(&form.get_cast_column().to_string()),
-                    "布尔值转换" => service.convert_to_boolean(&form.get_bool_convert_column().to_string()),
+                    "字符串转数值" => {
+                        service.convert_string_to_numeric(&form.get_cast_column().to_string())
+                    }
+                    "字符串转日期" => {
+                        service.convert_string_to_datetime(&form.get_cast_column().to_string())
+                    }
+                    "整型转浮点" => {
+                        service.convert_integer_to_float(&form.get_cast_column().to_string())
+                    }
+                    "布尔值转换" => {
+                        service.convert_to_boolean(&form.get_bool_convert_column().to_string())
+                    }
                     "类型转换" => service.cast_column(
                         &form.get_cast_column().to_string(),
                         parse_logical_type(&form.get_cast_target().to_string()),
@@ -432,9 +464,8 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                 let form = ui.global::<FormState>();
                 let operation = form.get_time_operation().to_string();
                 let status = match operation.as_str() {
-                    "时间戳转换" => {
-                        service.convert_timestamp_to_datetime(&form.get_time_target_column().to_string())
-                    }
+                    "时间戳转换" => service
+                        .convert_timestamp_to_datetime(&form.get_time_target_column().to_string()),
                     "日期拆分" => service.split_datetime_parts(
                         &form.get_time_target_column().to_string(),
                         &form.get_time_output_prefix().to_string(),
@@ -476,7 +507,8 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         &form.get_time_target_column().to_string(),
                         &form.get_time_output_column().to_string(),
                     ),
-                    _ => service.normalize_datetime_format(&form.get_time_target_column().to_string()),
+                    _ => service
+                        .normalize_datetime_format(&form.get_time_target_column().to_string()),
                 }
                 .unwrap_or_else(|error| format!("时间处理失败：{error:#}"));
                 refresh_ui(ui, service, &status);
@@ -506,7 +538,8 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let columns = split_csv_like(&ui.global::<FormState>().get_column_list().to_string());
+                let columns =
+                    split_csv_like(&ui.global::<FormState>().get_column_list().to_string());
                 let status = service
                     .keep_columns(columns)
                     .unwrap_or_else(|error| format!("保留列失败：{error:#}"));
@@ -520,7 +553,8 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let columns = split_csv_like(&ui.global::<FormState>().get_column_list().to_string());
+                let columns =
+                    split_csv_like(&ui.global::<FormState>().get_column_list().to_string());
                 let status = service
                     .drop_columns(columns)
                     .unwrap_or_else(|error| format!("删除列失败：{error:#}"));
@@ -536,7 +570,10 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
             with_ui(&weak, &service, |ui, service| {
                 let form = ui.global::<FormState>();
                 let status = service
-                    .sort_by(&form.get_sort_column().to_string(), form.get_sort_ascending())
+                    .sort_by(
+                        &form.get_sort_column().to_string(),
+                        form.get_sort_ascending(),
+                    )
                     .unwrap_or_else(|error| format!("排序失败：{error:#}"));
                 refresh_ui(ui, service, &status);
             });
@@ -630,8 +667,10 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let count =
-                    parse_usize_or_default(&ui.global::<FormState>().get_top_row_count().to_string(), 100);
+                let count = parse_usize_or_default(
+                    &ui.global::<FormState>().get_top_row_count().to_string(),
+                    100,
+                );
                 let status = service
                     .keep_top_rows(count)
                     .unwrap_or_else(|error| format!("保留前 N 行失败：{error:#}"));
@@ -645,8 +684,10 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let count =
-                    parse_usize_or_default(&ui.global::<FormState>().get_sample_row_count().to_string(), 50);
+                let count = parse_usize_or_default(
+                    &ui.global::<FormState>().get_sample_row_count().to_string(),
+                    50,
+                );
                 let status = service
                     .sample_rows(count)
                     .unwrap_or_else(|error| format!("抽样失败：{error:#}"));
@@ -660,7 +701,8 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         let service = service.clone();
         move || {
             with_ui(&weak, &service, |ui, service| {
-                let columns = split_csv_like(&ui.global::<FormState>().get_missing_columns().to_string());
+                let columns =
+                    split_csv_like(&ui.global::<FormState>().get_missing_columns().to_string());
                 let status = service
                     .drop_rows_with_missing(columns)
                     .unwrap_or_else(|error| format!("删除缺失记录失败：{error:#}"));
@@ -814,32 +856,47 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                     ),
                     "多列排序" => {
                         let columns = split_csv_like(&form.get_derive_sort_columns().to_string());
-                        let directions = parse_sort_directions(&form.get_derive_sort_orders().to_string(), columns.len());
+                        let directions = parse_sort_directions(
+                            &form.get_derive_sort_orders().to_string(),
+                            columns.len(),
+                        );
                         service.multi_sort(columns, directions)
                     }
                     "条件优先排序" => {
                         let columns = split_csv_like(&form.get_derive_sort_columns().to_string());
-                        let directions = parse_sort_directions(&form.get_derive_sort_orders().to_string(), columns.len());
+                        let directions = parse_sort_directions(
+                            &form.get_derive_sort_orders().to_string(),
+                            columns.len(),
+                        );
                         service.priority_sort(
                             &form.get_derive_priority_column().to_string(),
-                            parse_compare_operator(&form.get_derive_priority_operator().to_string()),
+                            parse_compare_operator(
+                                &form.get_derive_priority_operator().to_string(),
+                            ),
                             &form.get_derive_priority_value().to_string(),
-                            parse_priority_placement(&form.get_derive_priority_placement().to_string()),
+                            parse_priority_placement(
+                                &form.get_derive_priority_placement().to_string(),
+                            ),
                             columns,
                             directions,
                         )
                     }
                     "生成排名列" => {
-                        let columns = if form.get_derive_sort_columns().to_string().trim().is_empty() {
-                            vec![form.get_derive_sort_column().to_string()]
-                        } else {
-                            split_csv_like(&form.get_derive_sort_columns().to_string())
-                        };
-                        let directions = if form.get_derive_sort_columns().to_string().trim().is_empty() {
-                            vec![form.get_derive_sort_ascending()]
-                        } else {
-                            parse_sort_directions(&form.get_derive_sort_orders().to_string(), columns.len())
-                        };
+                        let columns =
+                            if form.get_derive_sort_columns().to_string().trim().is_empty() {
+                                vec![form.get_derive_sort_column().to_string()]
+                            } else {
+                                split_csv_like(&form.get_derive_sort_columns().to_string())
+                            };
+                        let directions =
+                            if form.get_derive_sort_columns().to_string().trim().is_empty() {
+                                vec![form.get_derive_sort_ascending()]
+                            } else {
+                                parse_sort_directions(
+                                    &form.get_derive_sort_orders().to_string(),
+                                    columns.len(),
+                                )
+                            };
                         service.add_rank_column(
                             &form.get_derive_rank_output_column().to_string(),
                             columns,
@@ -860,8 +917,10 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
         move || {
             with_ui(&weak, &service, |ui, service| {
                 let form = ui.global::<FormState>();
-                let group_columns = split_csv_like(&form.get_derive_window_group_columns().to_string());
-                let window_size = parse_bounded_usize(&form.get_derive_window_size().to_string(), 3, 1, 9999);
+                let group_columns =
+                    split_csv_like(&form.get_derive_window_group_columns().to_string());
+                let window_size =
+                    parse_bounded_usize(&form.get_derive_window_size().to_string(), 3, 1, 9999);
                 let status = match form.get_derive_window_operation().to_string().as_str() {
                     "滚动统计" => service.rolling_aggregate(
                         group_columns,
@@ -888,7 +947,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         group_columns,
                         &form.get_derive_window_order_column().to_string(),
                         &form.get_derive_window_target_column().to_string(),
-                        parse_adjacent_compare_mode(&form.get_derive_window_compare_mode().to_string()),
+                        parse_adjacent_compare_mode(
+                            &form.get_derive_window_compare_mode().to_string(),
+                        ),
                         &form.get_derive_window_output_column().to_string(),
                     ),
                     _ => Ok("未识别的窗口操作".to_string()),
@@ -915,28 +976,9 @@ fn install_callbacks(ui: &MainWindow, service: Rc<RefCell<AppService>>) {
                         split_csv_like(&form.get_join_left_key().to_string()),
                         split_csv_like(&form.get_join_right_key().to_string()),
                         JoinKind::from_text(&form.get_join_kind().to_string()),
-                        JoinConflictStrategy::from_text(
-                            &form.get_join_conflict_mode().to_string(),
-                        ),
+                        JoinConflictStrategy::from_text(&form.get_join_conflict_mode().to_string()),
                     )
                     .unwrap_or_else(|error| format!("融合失败：{error:#}"));
-                refresh_ui(ui, service, &status);
-            });
-        }
-    });
-
-    let weak = ui.as_weak();
-    ui.global::<Logic>().on_autofill_fusion({
-        let service = service.clone();
-        move || {
-            with_ui(&weak, &service, |ui, service| {
-                let status = match service.suggest_fusion_defaults() {
-                    Ok(defaults) => {
-                        apply_fusion_defaults(&ui.global::<FormState>(), &defaults);
-                        "已根据当前主源和候选辅源自动识别融合参数".to_string()
-                    }
-                    Err(error) => format!("自动识别融合参数失败：{error:#}"),
-                };
                 refresh_ui(ui, service, &status);
             });
         }
@@ -1167,7 +1209,12 @@ fn visualization_numeric_columns(record: &DatasetRecord) -> Vec<String> {
         .working_table
         .columns
         .iter()
-        .filter(|column| matches!(column.logical_type, LogicalType::Integer | LogicalType::Float))
+        .filter(|column| {
+            matches!(
+                column.logical_type,
+                LogicalType::Integer | LogicalType::Float
+            )
+        })
         .map(|column| column.name.clone())
         .collect()
 }
@@ -1251,20 +1298,22 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
                     .unwrap_or_default()
                     .into(),
             );
-            if let Ok(suggestion) =
-                service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
+            if let Ok(suggestion) = service
+                .suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
             {
                 apply_visualization_suggestion(&form, &suggestion, true);
             }
         }
 
-        let preview_size = parse_bounded_usize(&form.get_preview_row_count().to_string(), 20, 1, 200);
+        let preview_size =
+            parse_bounded_usize(&form.get_preview_row_count().to_string(), 20, 1, 200);
         let field_size = parse_bounded_usize(&form.get_field_row_count().to_string(), 12, 5, 50);
         let preview_page = form.get_preview_page().max(1) as usize;
         let field_page = form.get_field_page().max(1) as usize;
         let preview_mode = form.get_preview_mode().to_string();
 
-        let preview = build_preview_model(record, preview_mode.as_str(), preview_page, preview_size);
+        let preview =
+            build_preview_model(record, preview_mode.as_str(), preview_page, preview_size);
         let fields = build_column_model(record, field_page, field_size);
         form.set_preview_page(preview.page as i32);
         form.set_field_page(fields.page as i32);
@@ -1301,9 +1350,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             )
             .into(),
         );
-        state.set_quality_rule_summary(
-            build_quality_rule_summary(record).into(),
-        );
+        state.set_quality_rule_summary(build_quality_rule_summary(record).into());
         state.set_active_count_label(
             format!(
                 "当前数据集：{} / 步骤 {} / 最近导入 {}",
@@ -1314,7 +1361,9 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             .into(),
         );
         state.set_preview_columns(ModelRc::new(VecModel::from(map_preview_columns(
-            &record.working_table.preview_header(record.working_table.width()),
+            &record
+                .working_table
+                .preview_header(record.working_table.width()),
         ))));
         state.set_preview_page_label(preview.page_label.into());
         state.set_preview_range_label(preview.range_label.into());
@@ -1330,7 +1379,9 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_join_target_hint(service.join_target_hint().into());
         state.set_fusion_source_hint(service.fusion_source_hint().into());
         state.set_visualization_all_columns(build_string_model(visualization_all_columns(record)));
-        state.set_visualization_numeric_columns(build_string_model(visualization_numeric_columns(record)));
+        state.set_visualization_numeric_columns(build_string_model(visualization_numeric_columns(
+            record,
+        )));
         if let Ok(suggestion) =
             service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
         {
@@ -1347,7 +1398,8 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         } else {
             state.set_visualization_preview_image(Image::default());
             state.set_visualization_preview_summary(
-                "尚未生成预览，先识别字段再刷新图像。预览文件会写入 target/visualization_preview。".into(),
+                "尚未生成预览，先识别字段再刷新图像。预览文件会写入 target/visualization_preview。"
+                    .into(),
             );
             state.set_visualization_preview_path("无可用图像".into());
         }
@@ -1406,20 +1458,6 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
                 })
                 .collect::<Vec<_>>(),
         )));
-        state.set_fusion_hints(ModelRc::new(VecModel::from(
-            service
-                .fusion_source_hints()
-                .iter()
-                .map(|hint| FusionHintData {
-                    dataset_id: hint.dataset_id.to_string().into(),
-                    dataset_name: hint.dataset_name.clone().into(),
-                    role_hint: hint.role_hint.clone().into(),
-                    object_hint: hint.object_hint.clone().into(),
-                    time_hint: hint.time_hint.clone().into(),
-                    note: hint.note.clone().into(),
-                })
-                .collect::<Vec<_>>(),
-        )));
         if let Some(report) = service.last_join_report() {
             state.set_join_match_summary(format!("成功匹配 {} 条", report.matched_rows).into());
             state.set_join_unmatched_summary(
@@ -1456,20 +1494,26 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
             let trace = if report.skipped_sources.is_empty() {
                 report.trace_summary.clone()
             } else {
-                format!("{} | 跳过辅源：{}", report.trace_summary, report.skipped_sources.join("；"))
+                format!(
+                    "{} | 跳过辅源：{}",
+                    report.trace_summary,
+                    report.skipped_sources.join("；")
+                )
             };
             state.set_fusion_trace_summary(trace.into());
         } else {
             state.set_fusion_source_summary("未执行融合，默认以当前选中数据集作为主源。".into());
             state.set_fusion_alignment_summary("等待选择辅源、对象键和时间列。".into());
-            state.set_fusion_quality_summary("可选缺失补偿、异常剔除、去重包和质量评分。".into());
-            state.set_fusion_output_summary("执行后会生成统一时序表，并可附带特征表、事件表、告警表。".into());
-            state.set_fusion_trace_summary("每条结果会附带匹配轨迹、质量分、告警级别和修正记录。".into());
+            state.set_fusion_quality_summary("支持去重包、异常清洗、缺失补偿和质量评分。".into());
+            state.set_fusion_output_summary("执行后只生成一张融合结果表。".into());
+            state.set_fusion_trace_summary(
+                "结果会保留质量分、匹配轨迹和修正记录三个追踪字段。".into(),
+            );
         }
     } else {
         state.set_selected_dataset_id(0);
         state.set_current_dataset_name("尚未导入数据".into());
-        state.set_current_dataset_overview("点击左侧导入按钮开始".into());
+        state.set_current_dataset_overview("点击左上角导入按钮开始".into());
         state.set_quality_summary("暂无分析结果".into());
         form.set_quality_primary_key(SharedString::new());
         form.set_quality_composite_keys(SharedString::new());
@@ -1521,8 +1565,9 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_issues(ModelRc::new(VecModel::from(Vec::<IssueRowData>::new())));
         state.set_steps(ModelRc::new(VecModel::from(Vec::<StepRowData>::new())));
         state.set_mappings(ModelRc::new(VecModel::from(Vec::<MappingRowData>::new())));
-        state.set_join_suggestions(ModelRc::new(VecModel::from(Vec::<JoinSuggestionData>::new())));
-        state.set_fusion_hints(ModelRc::new(VecModel::from(Vec::<FusionHintData>::new())));
+        state.set_join_suggestions(ModelRc::new(VecModel::from(
+            Vec::<JoinSuggestionData>::new(),
+        )));
         state.set_join_match_summary("尚未执行融合".into());
         state.set_join_unmatched_summary("尚未生成未匹配统计".into());
         state.set_join_conflict_summary("尚未生成冲突字段清单".into());
@@ -1531,7 +1576,7 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_fusion_alignment_summary("等待主源、辅源、对象键和时间列。".into());
         state.set_fusion_quality_summary("默认支持去重包、异常清洗、缺失补偿和质量评分。".into());
         state.set_fusion_output_summary("统一时序表仅保留必要的质量分、轨迹和修正字段。".into());
-        state.set_fusion_trace_summary("事件表和告警表会承接主要追溯信息。".into());
+        state.set_fusion_trace_summary("只生成融合结果表，不再生成特征表、事件表和告警表。".into());
     }
 
     state.set_status_message(status.into());
@@ -1542,27 +1587,17 @@ fn build_metrics(record: &DatasetRecord) -> Vec<MetricCardData> {
         MetricCardData {
             title: "总行数".into(),
             value: record.profile.row_count.to_string().into(),
-            detail: "当前工作表记录规模".into(),
+            detail: "".into(),
         },
         MetricCardData {
             title: "字段总数".into(),
             value: record.profile.column_count.to_string().into(),
-            detail: format!(
-                "数值列 {} / 时间列 {}",
-                record.profile.numeric_columns.len(),
-                record.profile.time_candidates.len()
-            )
-            .into(),
+            detail: "".into(),
         },
         MetricCardData {
             title: "质量问题".into(),
             value: record.profile.quality_issues.len().to_string().into(),
-            detail: format!(
-                "高缺失 {} / 主键重复 {}",
-                record.profile.quality_overview.high_missing_field_count,
-                record.profile.quality_overview.primary_key_duplicate_count
-            )
-            .into(),
+            detail: "".into(),
         },
         MetricCardData {
             title: "流程步骤".into(),
@@ -1573,7 +1608,12 @@ fn build_metrics(record: &DatasetRecord) -> Vec<MetricCardData> {
 }
 
 fn map_preview_columns(header: &crate::model::PreviewHeader) -> Vec<SharedString> {
-    header.cells.iter().cloned().map(SharedString::from).collect()
+    header
+        .cells
+        .iter()
+        .cloned()
+        .map(SharedString::from)
+        .collect()
 }
 
 fn map_preview_row(row: &PreviewRow) -> PreviewRowData {
@@ -1634,10 +1674,7 @@ fn build_fusion_request(form: &FormState) -> FusionRequest {
             &form.get_fusion_time_window_seconds().to_string(),
             5,
         ),
-        resample_seconds: parse_i64_or_default(
-            &form.get_fusion_resample_seconds().to_string(),
-            60,
-        ),
+        resample_seconds: parse_i64_or_default(&form.get_fusion_resample_seconds().to_string(), 60),
         missing_strategy: FusionMissingStrategy::from_text(
             &form.get_fusion_missing_strategy().to_string(),
         ),
@@ -1645,40 +1682,19 @@ fn build_fusion_request(form: &FormState) -> FusionRequest {
         deduplicate_packets: form.get_fusion_deduplicate_packets(),
         clean_outliers: form.get_fusion_clean_outliers(),
         score_quality: form.get_fusion_score_quality(),
-        generate_features: form.get_fusion_generate_features(),
-        generate_events: form.get_fusion_generate_events(),
-        generate_alerts: form.get_fusion_generate_alerts(),
+        generate_features: false,
+        generate_events: false,
+        generate_alerts: false,
         outlier_zscore: parse_f64_or_default(&form.get_fusion_outlier_zscore().to_string(), 3.5),
-        alert_threshold: parse_f64_or_default(&form.get_fusion_alert_threshold().to_string(), 70.0),
+        alert_threshold: 70.0,
     }
-}
-
-fn apply_fusion_defaults(form: &FormState, defaults: &FusionDefaults) {
-    if form.get_fusion_secondary_dataset_ids().to_string().trim().is_empty() {
-        form.set_fusion_secondary_dataset_ids(
-            defaults
-                .secondary_dataset_ids
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-                .into(),
-        );
-    }
-    if form.get_fusion_object_keys().to_string().trim().is_empty() {
-        form.set_fusion_object_keys(defaults.object_keys.join(", ").into());
-    }
-    if form.get_fusion_time_column().to_string().trim().is_empty() {
-        form.set_fusion_time_column(defaults.time_column.clone().into());
-    }
-    form.set_fusion_alignment_mode(defaults.alignment_mode.as_str().into());
-    form.set_fusion_time_window_seconds(defaults.time_window_seconds.to_string().into());
-    form.set_fusion_resample_seconds(defaults.resample_seconds.to_string().into());
 }
 
 fn build_visualization_request(form: &FormState) -> VisualizationRequest {
     VisualizationRequest {
-        chart_type: VisualizationChartType::from_text(&form.get_visualization_chart_type().to_string()),
+        chart_type: VisualizationChartType::from_text(
+            &form.get_visualization_chart_type().to_string(),
+        ),
         output_format: VisualizationOutputFormat::from_text(
             &form.get_visualization_output_format().to_string(),
         ),
@@ -1710,7 +1726,9 @@ fn build_visualization_request(form: &FormState) -> VisualizationRequest {
 }
 
 fn autofill_visualization_if_needed(service: &AppService, form: &FormState) {
-    if let Ok(suggestion) = service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string()) {
+    if let Ok(suggestion) =
+        service.suggest_visualization_fields(&form.get_visualization_chart_type().to_string())
+    {
         apply_visualization_suggestion(form, &suggestion, false);
     }
 }
@@ -1828,7 +1846,12 @@ fn parse_usize_or_default(value: &str, default_value: usize) -> usize {
     value.trim().parse::<usize>().unwrap_or(default_value)
 }
 
-fn parse_bounded_usize(value: &str, default_value: usize, min_value: usize, max_value: usize) -> usize {
+fn parse_bounded_usize(
+    value: &str,
+    default_value: usize,
+    min_value: usize,
+    max_value: usize,
+) -> usize {
     parse_usize_or_default(value, default_value).clamp(min_value, max_value)
 }
 
@@ -1943,7 +1966,11 @@ fn build_preview_model(
     }
 }
 
-fn build_column_model(record: &DatasetRecord, requested_page: usize, page_size: usize) -> ColumnPageModel {
+fn build_column_model(
+    record: &DatasetRecord,
+    requested_page: usize,
+    page_size: usize,
+) -> ColumnPageModel {
     let total_items = record.profile.columns.len();
     let total_pages = if total_items == 0 {
         1
@@ -2019,7 +2046,10 @@ fn describe_range_rule(record: &DatasetRecord) -> String {
         return "未设置".to_string();
     }
 
-    match (record.quality_rules.range_min, record.quality_rules.range_max) {
+    match (
+        record.quality_rules.range_min,
+        record.quality_rules.range_max,
+    ) {
         (Some(min), Some(max)) => format!("{column}: {min} ~ {max}"),
         (Some(min), None) => format!("{column}: >= {min}"),
         (None, Some(max)) => format!("{column}: <= {max}"),

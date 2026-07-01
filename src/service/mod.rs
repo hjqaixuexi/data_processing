@@ -1,7 +1,5 @@
 ﻿use crate::exporter;
-use crate::fusion::{
-    self, FusionDefaults, FusionRequest, FusionSourceHint,
-};
+use crate::fusion::{self, FusionRequest};
 use crate::inspector;
 use crate::loader;
 use crate::model::{
@@ -139,52 +137,6 @@ impl AppService {
         } else {
             format!("可选辅源：{}", options.join(" | "))
         }
-    }
-
-    pub fn fusion_source_hints(&self) -> Vec<FusionSourceHint> {
-        let Some(selected) = self.selected_dataset() else {
-            return Vec::new();
-        };
-        let primary = fusion::SourceBundle {
-            dataset_id: selected.id,
-            dataset_name: &selected.dataset_name,
-            table: &selected.working_table,
-            profile: &selected.profile,
-        };
-        let others = self
-            .datasets
-            .iter()
-            .filter(|record| record.id != selected.id)
-            .map(|record| fusion::SourceBundle {
-                dataset_id: record.id,
-                dataset_name: &record.dataset_name,
-                table: &record.working_table,
-                profile: &record.profile,
-            })
-            .collect::<Vec<_>>();
-        fusion::build_source_hints(primary, &others)
-    }
-
-    pub fn suggest_fusion_defaults(&self) -> Result<FusionDefaults> {
-        let selected = self.selected_dataset().context("当前没有选中数据集")?;
-        let primary = fusion::SourceBundle {
-            dataset_id: selected.id,
-            dataset_name: &selected.dataset_name,
-            table: &selected.working_table,
-            profile: &selected.profile,
-        };
-        let others = self
-            .datasets
-            .iter()
-            .filter(|record| record.id != selected.id)
-            .map(|record| fusion::SourceBundle {
-                dataset_id: record.id,
-                dataset_name: &record.dataset_name,
-                table: &record.working_table,
-                profile: &record.profile,
-            })
-            .collect::<Vec<_>>();
-        Ok(fusion::suggest_defaults(primary, &others))
     }
 
     pub fn last_join_report(&self) -> Option<&JoinReport> {
@@ -1169,7 +1121,6 @@ impl AppService {
             .iter()
             .filter(|record| secondary_ids.contains(&record.id))
             .map(|record| fusion::SourceBundle {
-                dataset_id: record.id,
                 dataset_name: &record.dataset_name,
                 table: &record.working_table,
                 profile: &record.profile,
@@ -1182,7 +1133,6 @@ impl AppService {
         let execution = fusion::execute(
             &request,
             fusion::SourceBundle {
-                dataset_id: primary.id,
                 dataset_name: &primary.dataset_name,
                 table: &primary.working_table,
                 profile: &primary.profile,
@@ -1197,46 +1147,13 @@ impl AppService {
         self.invalidate_runtime_reports();
 
         let fusion_base_name = format!("{}_多源融合", primary.dataset_name);
-        let mut created_datasets = Vec::new();
-        let unified_name = format!("{fusion_base_name}_统一时序");
+        let unified_name = format!("{fusion_base_name}_融合结果");
         let unified_id = self.push_generated_dataset(
             unified_name.clone(),
             primary.source_path.clone(),
             execution.unified_table,
             format!("主源 {} + 辅源 {}", primary.dataset_name, secondary_names.join(", ")),
         )?;
-        created_datasets.push(unified_name);
-
-        if let Some(feature_table) = execution.feature_table {
-            let name = format!("{fusion_base_name}_统计特征");
-            self.push_generated_dataset(
-                name.clone(),
-                primary.source_path.clone(),
-                feature_table,
-                "按对象键聚合生成统计特征表".to_string(),
-            )?;
-            created_datasets.push(name);
-        }
-        if let Some(event_table) = execution.event_table {
-            let name = format!("{fusion_base_name}_事件片段");
-            self.push_generated_dataset(
-                name.clone(),
-                primary.source_path.clone(),
-                event_table,
-                "按时间断点和质量波动切分事件片段".to_string(),
-            )?;
-            created_datasets.push(name);
-        }
-        if let Some(alert_table) = execution.alert_table {
-            let name = format!("{fusion_base_name}_告警结果");
-            self.push_generated_dataset(
-                name.clone(),
-                primary.source_path.clone(),
-                alert_table,
-                "输出低质量、缺失和异常告警记录".to_string(),
-            )?;
-            created_datasets.push(name);
-        }
 
         self.selected_dataset_id = Some(unified_id);
         self.last_fusion_report = Some(FusionRunReport {
@@ -1246,7 +1163,7 @@ impl AppService {
             output_summary: format!(
                 "{} | 新数据集：{}",
                 execution.report.output_summary,
-                created_datasets.join("、")
+                unified_name
             ),
             trace_summary: execution.report.trace_summary,
             skipped_sources: execution.report.skipped_sources,

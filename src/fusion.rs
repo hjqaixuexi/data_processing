@@ -4,14 +4,18 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+#[allow(dead_code)]
 const DEFAULT_WINDOW_SECONDS: i64 = 5;
+#[allow(dead_code)]
 const DEFAULT_RESAMPLE_SECONDS: i64 = 60;
+#[allow(dead_code)]
 const MAX_FEATURE_COLUMNS: usize = 12;
-
 #[derive(Clone, Debug)]
 pub enum FusionAlignmentMode {
     ExactTime,
+    ExactThenNearest,
     NearestWithinWindow,
+    ExactThenWindow,
     WindowAggregation,
     ResampleNearest,
 }
@@ -19,7 +23,9 @@ pub enum FusionAlignmentMode {
 impl FusionAlignmentMode {
     pub fn from_text(value: &str) -> Self {
         match value.trim() {
+            "精确优先，最近邻兜底" => Self::ExactThenNearest,
             "按时间窗聚合" => Self::WindowAggregation,
+            "精确优先，时间窗聚合兜底" => Self::ExactThenWindow,
             "按重采样对齐" => Self::ResampleNearest,
             "按最近邻对齐" => Self::NearestWithinWindow,
             _ => Self::ExactTime,
@@ -29,7 +35,9 @@ impl FusionAlignmentMode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::ExactTime => "按时间精确对齐",
+            Self::ExactThenNearest => "精确优先，最近邻兜底",
             Self::NearestWithinWindow => "按最近邻对齐",
+            Self::ExactThenWindow => "精确优先，时间窗聚合兜底",
             Self::WindowAggregation => "按时间窗聚合",
             Self::ResampleNearest => "按重采样对齐",
         }
@@ -41,6 +49,7 @@ pub enum FusionMissingStrategy {
     KeepNull,
     ForwardFill,
     BackwardFill,
+    NearestFill,
     LinearInterpolate,
     WindowMean,
 }
@@ -50,6 +59,7 @@ impl FusionMissingStrategy {
         match value.trim() {
             "前向填充" => Self::ForwardFill,
             "后向填充" => Self::BackwardFill,
+            "前后就近填充" => Self::NearestFill,
             "线性插值" => Self::LinearInterpolate,
             "窗口均值" => Self::WindowMean,
             _ => Self::KeepNull,
@@ -61,6 +71,7 @@ impl FusionMissingStrategy {
             Self::KeepNull => "保持空值并标记",
             Self::ForwardFill => "前向填充",
             Self::BackwardFill => "后向填充",
+            Self::NearestFill => "前后就近填充",
             Self::LinearInterpolate => "线性插值",
             Self::WindowMean => "窗口均值",
         }
@@ -70,7 +81,9 @@ impl FusionMissingStrategy {
 #[derive(Clone, Debug)]
 pub enum FusionStrategy {
     PrimaryFirst,
+    SecondaryFirst,
     ConfidenceWeighted,
+    NumericAverage,
     ComplementaryFill,
     ConflictRetention,
 }
@@ -78,7 +91,9 @@ pub enum FusionStrategy {
 impl FusionStrategy {
     pub fn from_text(value: &str) -> Self {
         match value.trim() {
+            "辅源优先" => Self::SecondaryFirst,
             "质量加权" => Self::ConfidenceWeighted,
+            "数值均值" => Self::NumericAverage,
             "互补填充" => Self::ComplementaryFill,
             "冲突保留" => Self::ConflictRetention,
             _ => Self::PrimaryFirst,
@@ -87,6 +102,7 @@ impl FusionStrategy {
 
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct FusionRequest {
     pub secondary_dataset_ids: Vec<i32>,
@@ -108,26 +124,6 @@ pub struct FusionRequest {
 }
 
 #[derive(Clone, Debug)]
-pub struct FusionSourceHint {
-    pub dataset_id: i32,
-    pub dataset_name: String,
-    pub role_hint: String,
-    pub object_hint: String,
-    pub time_hint: String,
-    pub note: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct FusionDefaults {
-    pub secondary_dataset_ids: Vec<i32>,
-    pub object_keys: Vec<String>,
-    pub time_column: String,
-    pub alignment_mode: FusionAlignmentMode,
-    pub time_window_seconds: i64,
-    pub resample_seconds: i64,
-}
-
-#[derive(Clone, Debug)]
 pub struct FusionReport {
     pub source_summary: String,
     pub alignment_summary: String,
@@ -143,15 +139,11 @@ pub struct FusionReport {
 #[derive(Clone, Debug)]
 pub struct FusionExecution {
     pub unified_table: DataTable,
-    pub feature_table: Option<DataTable>,
-    pub event_table: Option<DataTable>,
-    pub alert_table: Option<DataTable>,
     pub report: FusionReport,
 }
 
 #[derive(Clone, Copy)]
 pub struct SourceBundle<'a> {
-    pub dataset_id: i32,
     pub dataset_name: &'a str,
     pub table: &'a DataTable,
     pub profile: &'a DatasetProfile,
@@ -176,6 +168,7 @@ struct OutputBinding {
 #[derive(Clone, Debug)]
 struct PreparedSource {
     dataset_name: String,
+    trace_label: String,
     rows_by_key: BTreeMap<String, Vec<PreparedRow>>,
     bindings: Vec<OutputBinding>,
     confidence: f64,
@@ -201,75 +194,6 @@ struct FusionAnchorRow {
     quality_score: f64,
 }
 
-pub fn build_source_hints(primary: SourceBundle<'_>, others: &[SourceBundle<'_>]) -> Vec<FusionSourceHint> {
-    let primary_keys = resolve_default_keys(primary.profile, primary.table, &[]);
-    let primary_time = resolve_default_time(primary.profile, primary.table, "");
-    let mut hints = others
-        .iter()
-        .filter(|source| source.dataset_id != primary.dataset_id)
-        .map(|source| {
-            let shared_keys = shared_key_candidates(
-                primary_keys.as_deref().unwrap_or(&[]),
-                &source.profile.key_candidates,
-                source.table,
-            );
-            let time_hint = resolve_default_time(source.profile, source.table, "")
-                .unwrap_or_else(|| "未识别".to_string());
-            let shared_time = primary_time
-                .as_ref()
-                .map(|name| normalize_name(name) == normalize_name(&time_hint))
-                .unwrap_or(false);
-            let note = if !shared_keys.is_empty() && shared_time {
-                "键值与时间轴都可自动映射，适合直接做时序融合".to_string()
-            } else if !shared_keys.is_empty() {
-                "对象键可自动映射，建议使用最近邻或时间窗对齐".to_string()
-            } else {
-                "缺少明显对象键，建议先统一字段命名再参与融合".to_string()
-            };
-            FusionSourceHint {
-                dataset_id: source.dataset_id,
-                dataset_name: source.dataset_name.to_string(),
-                role_hint: guess_role_label(source.dataset_name).to_string(),
-                object_hint: if shared_keys.is_empty() {
-                    "未发现共享对象键".to_string()
-                } else {
-                    shared_keys.join(", ")
-                },
-                time_hint,
-                note,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    hints.sort_by(|left, right| {
-        hint_score(right)
-            .partial_cmp(&hint_score(left))
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| left.dataset_id.cmp(&right.dataset_id))
-    });
-    hints
-}
-
-pub fn suggest_defaults(primary: SourceBundle<'_>, others: &[SourceBundle<'_>]) -> FusionDefaults {
-    let hints = build_source_hints(primary, others);
-    let object_keys = resolve_default_keys(primary.profile, primary.table, &[])
-        .unwrap_or_default();
-    let time_column = resolve_default_time(primary.profile, primary.table, "").unwrap_or_default();
-    let alignment_mode = if time_column.is_empty() {
-        FusionAlignmentMode::ExactTime
-    } else {
-        FusionAlignmentMode::NearestWithinWindow
-    };
-    FusionDefaults {
-        secondary_dataset_ids: hints.iter().take(3).map(|hint| hint.dataset_id).collect(),
-        object_keys,
-        time_column,
-        alignment_mode,
-        time_window_seconds: DEFAULT_WINDOW_SECONDS,
-        resample_seconds: DEFAULT_RESAMPLE_SECONDS,
-    }
-}
-
 pub fn execute(
     request: &FusionRequest,
     primary: SourceBundle<'_>,
@@ -279,10 +203,10 @@ pub fn execute(
         bail!("至少需要一个辅源数据集");
     }
 
-    let object_keys = resolve_default_keys(primary.profile, primary.table, &request.object_keys)
-        .context("主源缺少可用对象键")?;
-    let time_column = resolve_default_time(primary.profile, primary.table, &request.time_column)
-        .context("主源缺少可用时间字段")?;
+    let object_keys = resolve_required_keys(primary.table, &request.object_keys)
+        .context("主源对象键配置无效")?;
+    let time_column = resolve_required_time(primary.table, &request.time_column)
+        .context("主源时间列配置无效")?;
 
     let primary_prepared = prepare_primary_source(
         primary,
@@ -311,7 +235,10 @@ pub fn execute(
             &primary_name_map,
             request,
         ) {
-            Ok(prepared) => secondary_prepared.push(prepared),
+            Ok(mut prepared) => {
+                prepared.trace_label = format!("辅源{}", secondary_prepared.len() + 1);
+                secondary_prepared.push(prepared);
+            }
             Err(error) => {
                 skipped_sources.push(format!("{}: {error}", source.dataset_name));
             }
@@ -322,8 +249,11 @@ pub fn execute(
         bail!("所有辅源都无法映射到主源，请检查对象键和时间字段");
     }
 
-    let (headers, logical_types, secondary_field_count) =
-        build_output_schema(primary.table, &secondary_prepared);
+    let quality_field_count = secondary_prepared
+        .iter()
+        .map(|source| source.bindings.len())
+        .sum::<usize>();
+    let (headers, logical_types) = build_output_schema(primary.table, &mut secondary_prepared);
     let data_width = headers.len();
     let primary_width = primary.table.width();
 
@@ -375,13 +305,20 @@ pub fn execute(
                             found.confidence_weight,
                             &request.fusion_strategy,
                         );
+                    } else {
+                        raw_secondary_cells.push(cell);
                     }
-                    raw_secondary_cells.push(cell);
                 }
             } else {
                 missing_fields += source.bindings.len();
-                raw_secondary_cells.extend((0..source.bindings.len()).map(|_| None));
-                trace_parts.push(format!("{}: 未命中", source.dataset_name));
+                raw_secondary_cells.extend(
+                    source
+                        .bindings
+                        .iter()
+                        .filter(|binding| binding.overlaps_primary.is_none())
+                        .map(|_| None),
+                );
+                trace_parts.push(format!("{}: 未命中", source.trace_label));
             }
         }
 
@@ -393,7 +330,7 @@ pub fn execute(
             compute_quality_score(
                 matched_source_count,
                 secondary_prepared.len(),
-                secondary_field_count,
+                quality_field_count,
                 missing_fields,
                 anomaly_cells,
                 &trace_parts,
@@ -465,33 +402,11 @@ pub fn execute(
         total_time_distance as f64 / time_distance_count as f64
     };
 
-    let feature_table = request
-        .generate_features
-        .then(|| build_feature_table(&unified_table, &object_keys, &time_column))
-        .transpose()?;
-    let event_table = request
-        .generate_events
-        .then(|| build_event_table(&unified_table, &object_keys, &time_column, request))
-        .transpose()?;
-    let alert_table = request
-        .generate_alerts
-        .then(|| build_alert_table(&unified_table, &object_keys, &time_column, request))
-        .transpose()?;
-
-    let mut output_summary_parts = vec![format!(
-        "统一时序表 {} 行 x {} 列",
+    let output_summary = format!(
+        "融合结果表 {} 行 x {} 列",
         unified_table.height(),
         unified_table.width()
-    )];
-    if let Some(table) = feature_table.as_ref() {
-        output_summary_parts.push(format!("统计特征表 {} 行", table.height()));
-    }
-    if let Some(table) = event_table.as_ref() {
-        output_summary_parts.push(format!("事件片段表 {} 行", table.height()));
-    }
-    if let Some(table) = alert_table.as_ref() {
-        output_summary_parts.push(format!("告警表 {} 行", table.height()));
-    }
+    );
 
     let report = FusionReport {
         source_summary: format!(
@@ -500,7 +415,7 @@ pub fn execute(
             secondary_prepared.len(),
             secondary_prepared
                 .iter()
-                .map(|source| format!("{}({})", source.dataset_name, guess_role_label(&source.dataset_name)))
+                .map(|source| source.dataset_name.clone())
                 .collect::<Vec<_>>()
                 .join("、")
         ),
@@ -521,10 +436,9 @@ pub fn execute(
             request.missing_strategy.as_str(),
             average_quality_score
         ),
-        output_summary: output_summary_parts.join(" | "),
+        output_summary,
         trace_summary: format!(
-            "保留 {} 个融合跟踪字段；辅源平均缺失补位 {} 个字段；未映射源 {} 个",
-            9,
+            "保留 3 个追踪字段；辅源平均缺失补位 {:.1} 个字段；未映射辅源 {} 个",
             if primary_prepared.is_empty() {
                 0.0
             } else {
@@ -540,9 +454,6 @@ pub fn execute(
 
     Ok(FusionExecution {
         unified_table,
-        feature_table,
-        event_table,
-        alert_table,
         report,
     })
 }
@@ -585,7 +496,7 @@ fn prepare_secondary_source(
     request: &FusionRequest,
 ) -> Result<PreparedSource> {
     let mapped_object_keys = map_secondary_keys(source.table, primary_object_keys)?;
-    let time_column = map_secondary_time_column(source.table, source.profile, primary_time_column)?;
+    let time_column = map_secondary_time_column(source.table, primary_time_column)?;
     let object_indexes = find_indexes(source.table, &mapped_object_keys)?;
     let time_index = find_index(source.table, &time_column)?;
 
@@ -624,6 +535,7 @@ fn prepare_secondary_source(
     let missing_ratio = compute_missing_ratio(source.table);
     Ok(PreparedSource {
         dataset_name: source.dataset_name.to_string(),
+        trace_label: String::new(),
         rows_by_key,
         bindings,
         confidence: source_confidence(source, missing_ratio),
@@ -679,6 +591,11 @@ fn apply_missing_strategy_to_rows(
                     }
                 }
             }
+            FusionMissingStrategy::NearestFill => {
+                for column_index in &fillable_indexes {
+                    fill_group_with_nearest(rows, indexes, *column_index);
+                }
+            }
             FusionMissingStrategy::LinearInterpolate => {
                 for column_index in &fillable_indexes {
                     if numeric_indexes.contains(column_index) {
@@ -700,24 +617,31 @@ fn apply_missing_strategy_to_rows(
 
 fn build_output_schema(
     primary: &DataTable,
-    secondary_sources: &[PreparedSource],
-) -> (Vec<String>, Vec<LogicalType>, usize) {
+    secondary_sources: &mut [PreparedSource],
+) -> (Vec<String>, Vec<LogicalType>) {
     let mut headers = primary.column_names();
     let mut logical_types = primary
         .columns
         .iter()
         .map(|column| column.logical_type.clone())
         .collect::<Vec<_>>();
-    let mut secondary_field_count = 0usize;
+    let mut seen_names = headers
+        .iter()
+        .map(|name| normalize_name(name))
+        .collect::<BTreeSet<_>>();
 
-    for source in secondary_sources {
-        for binding in &source.bindings {
-            headers.push(binding.output_name.clone());
+    for source in secondary_sources.iter_mut() {
+        for binding in source.bindings.iter_mut() {
+            if binding.overlaps_primary.is_some() {
+                continue;
+            }
+            let output_name = unique_output_name(&binding.output_name, &mut seen_names);
+            binding.output_name = output_name.clone();
+            headers.push(output_name);
             logical_types.push(binding.logical_type.clone());
-            secondary_field_count += 1;
         }
     }
-    (headers, logical_types, secondary_field_count)
+    (headers, logical_types)
 }
 
 fn build_output_bindings(
@@ -741,7 +665,7 @@ fn build_output_bindings(
             }
             Some(OutputBinding {
                 source_index: index,
-                output_name: format!("{}__{}", dataset_alias(source.dataset_id, source.dataset_name), column.name),
+                output_name: column.name.clone(),
                 logical_type: column.logical_type.clone(),
                 overlaps_primary: primary_name_map.get(&normalized).copied(),
             })
@@ -772,9 +696,31 @@ fn select_secondary_match(
                 time_distance_seconds: Some(0),
                 anomaly_cells: row.anomaly_cells,
                 confidence_weight: source.confidence,
-                trace: format!("{}: 精确命中", source.dataset_name),
+                trace: format!("{}: 精确命中", source.trace_label),
             }),
+        FusionAlignmentMode::ExactThenNearest => group_rows
+            .iter()
+            .find(|row| row.timestamp == Some(primary_time))
+            .map(|row| MatchResult {
+                cells: row.cells.clone(),
+                time_distance_seconds: Some(0),
+                anomaly_cells: row.anomaly_cells,
+                confidence_weight: source.confidence,
+                trace: format!("{}: 精确命中", source.trace_label),
+            })
+            .or_else(|| nearest_match(group_rows, primary_time, window_seconds, source)),
         FusionAlignmentMode::NearestWithinWindow => nearest_match(group_rows, primary_time, window_seconds, source),
+        FusionAlignmentMode::ExactThenWindow => group_rows
+            .iter()
+            .find(|row| row.timestamp == Some(primary_time))
+            .map(|row| MatchResult {
+                cells: row.cells.clone(),
+                time_distance_seconds: Some(0),
+                anomaly_cells: row.anomaly_cells,
+                confidence_weight: source.confidence,
+                trace: format!("{}: 精确命中", source.trace_label),
+            })
+            .or_else(|| window_match(group_rows, primary_time, window_seconds, source)),
         FusionAlignmentMode::WindowAggregation => window_match(group_rows, primary_time, window_seconds, source),
         FusionAlignmentMode::ResampleNearest => resample_match(group_rows, primary_time, resample_seconds, source),
     };
@@ -799,7 +745,7 @@ fn nearest_match(
             time_distance_seconds: Some(distance),
             anomaly_cells: row.anomaly_cells,
             confidence_weight: time_weight(source.confidence, distance, window_seconds),
-            trace: format!("{}: 最近邻 {}s", source.dataset_name, distance),
+            trace: format!("{}: 最近邻 {}s", source.trace_label, distance),
         })
 }
 
@@ -831,7 +777,7 @@ fn window_match(
         time_distance_seconds: Some(avg_distance),
         anomaly_cells: selected.iter().map(|(row, _)| row.anomaly_cells).sum::<usize>(),
         confidence_weight: time_weight(source.confidence, avg_distance, window_seconds),
-        trace: format!("{}: 时间窗聚合 {} 行", source.dataset_name, selected.len()),
+        trace: format!("{}: 时间窗聚合 {} 行", source.trace_label, selected.len()),
     })
 }
 
@@ -854,7 +800,7 @@ fn resample_match(
             time_distance_seconds: Some(distance),
             anomaly_cells: row.anomaly_cells,
             confidence_weight: time_weight(source.confidence, distance, resample_seconds),
-            trace: format!("{}: 重采样桶命中 {}s", source.dataset_name, distance),
+            trace: format!("{}: 重采样桶命中 {}s", source.trace_label, distance),
         })
 }
 
@@ -876,6 +822,10 @@ fn apply_fusion_strategy(
                 *current_weight = candidate_weight;
             }
         }
+        FusionStrategy::SecondaryFirst => {
+            *current = candidate.clone();
+            *current_weight = candidate_weight;
+        }
         FusionStrategy::ComplementaryFill => {
             if !is_non_empty(current.as_deref()) {
                 *current = candidate.clone();
@@ -887,6 +837,23 @@ fn apply_fusion_strategy(
                 *current = candidate.clone();
                 *current_weight = candidate_weight;
             }
+        }
+        FusionStrategy::NumericAverage => {
+            if !is_non_empty(current.as_deref()) {
+                *current = candidate.clone();
+                *current_weight = candidate_weight;
+                return;
+            }
+            let Some(current_numeric) = current.as_ref().and_then(|value| parse_numeric(value)) else {
+                *current = candidate.clone();
+                *current_weight = candidate_weight;
+                return;
+            };
+            let Some(candidate_numeric) = candidate.as_ref().and_then(|value| parse_numeric(value)) else {
+                return;
+            };
+            *current = Some(format_number((current_numeric + candidate_numeric) / 2.0));
+            *current_weight = (*current_weight).max(candidate_weight);
         }
         FusionStrategy::ConfidenceWeighted => {
             if !is_non_empty(current.as_deref()) {
@@ -966,6 +933,11 @@ fn apply_missing_strategy(
                     }
                 }
             }
+            FusionMissingStrategy::NearestFill => {
+                for column_index in &fillable_indexes {
+                    fill_anchor_with_nearest(rows, indexes, *column_index);
+                }
+            }
             FusionMissingStrategy::LinearInterpolate => {
                 for column_index in &fillable_indexes {
                     if numeric_indexes.contains(column_index) {
@@ -985,6 +957,7 @@ fn apply_missing_strategy(
     }
 }
 
+#[allow(dead_code)]
 fn build_feature_table(table: &DataTable, object_keys: &[String], time_column: &str) -> Result<DataTable> {
     let key_indexes = find_indexes(table, object_keys)?;
     let time_index = find_index(table, time_column)?;
@@ -1068,6 +1041,7 @@ fn build_feature_table(table: &DataTable, object_keys: &[String], time_column: &
     ))
 }
 
+#[allow(dead_code)]
 fn build_event_table(
     table: &DataTable,
     object_keys: &[String],
@@ -1124,6 +1098,7 @@ fn build_event_table(
     Ok(build_table_from_rows(headers, Vec::new(), rows))
 }
 
+#[allow(dead_code)]
 fn build_alert_table(
     table: &DataTable,
     object_keys: &[String],
@@ -1196,6 +1171,7 @@ fn build_alert_table(
     ))
 }
 
+#[allow(dead_code)]
 fn build_event_row(
     object_key: &str,
     segment_id: usize,
@@ -1231,50 +1207,31 @@ fn build_event_row(
     ]
 }
 
-fn resolve_default_keys(
-    profile: &DatasetProfile,
-    table: &DataTable,
-    requested: &[String],
-) -> Option<Vec<String>> {
-    if !requested.is_empty() && requested.iter().all(|key| has_column(table, key)) {
-        return Some(requested.to_vec());
-    }
-    if !profile.resolved_composite_keys.is_empty()
-        && profile.resolved_composite_keys.iter().all(|key| has_column(table, key))
-    {
-        return Some(profile.resolved_composite_keys.clone());
-    }
-    if !profile.resolved_primary_key.is_empty() && has_column(table, &profile.resolved_primary_key) {
-        return Some(vec![profile.resolved_primary_key.clone()]);
-    }
-    let candidates = profile
-        .key_candidates
+fn resolve_required_keys(table: &DataTable, requested: &[String]) -> Result<Vec<String>> {
+    let keys = requested
         .iter()
-        .filter(|key| has_column(table, key))
-        .take(2)
-        .cloned()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
         .collect::<Vec<_>>();
-    (!candidates.is_empty()).then_some(candidates)
+    if keys.is_empty() {
+        bail!("请手工填写至少一个对象键");
+    }
+    if let Some(key) = keys.iter().find(|key| !has_column(table, key)) {
+        bail!("主源缺少对象键 {key}");
+    }
+    Ok(keys)
 }
 
-fn resolve_default_time(profile: &DatasetProfile, table: &DataTable, requested: &str) -> Option<String> {
-    if !requested.trim().is_empty() && has_column(table, requested) {
-        return Some(requested.trim().to_string());
+fn resolve_required_time(table: &DataTable, requested: &str) -> Result<String> {
+    let column = requested.trim();
+    if column.is_empty() {
+        bail!("请手工填写时间列");
     }
-    if !profile.resolved_time_column.is_empty() && has_column(table, &profile.resolved_time_column) {
-        return Some(profile.resolved_time_column.clone());
+    if !has_column(table, column) {
+        bail!("主源缺少时间列 {column}");
     }
-    profile
-        .time_candidates
-        .iter()
-        .find(|candidate| has_column(table, candidate))
-        .cloned()
-        .or_else(|| {
-            table.columns
-                .iter()
-                .find(|column| column.logical_type == LogicalType::DateTime)
-                .map(|column| column.name.clone())
-        })
+    Ok(column.to_string())
 }
 
 fn map_secondary_keys(table: &DataTable, primary_keys: &[String]) -> Result<Vec<String>> {
@@ -1284,18 +1241,8 @@ fn map_secondary_keys(table: &DataTable, primary_keys: &[String]) -> Result<Vec<
         .collect()
 }
 
-fn map_secondary_time_column(table: &DataTable, profile: &DatasetProfile, primary_time: &str) -> Result<String> {
-    if let Ok(column) = map_secondary_column(table, primary_time) {
-        return Ok(column);
-    }
-    resolve_default_time(profile, table, "")
-        .or_else(|| {
-            table.columns
-                .iter()
-                .find(|column| looks_like_time_name(&column.name))
-                .map(|column| column.name.clone())
-        })
-        .ok_or_else(|| anyhow!("未找到可映射的时间字段"))
+fn map_secondary_time_column(table: &DataTable, primary_time: &str) -> Result<String> {
+    map_secondary_column(table, primary_time)
 }
 
 fn map_secondary_column(table: &DataTable, primary_name: &str) -> Result<String> {
@@ -1304,31 +1251,7 @@ fn map_secondary_column(table: &DataTable, primary_name: &str) -> Result<String>
         .iter()
         .find(|column| normalize_name(&column.name) == primary_normalized)
         .map(|column| column.name.clone())
-        .or_else(|| {
-            table.columns
-                .iter()
-                .find(|column| normalize_name(&column.name).contains(&primary_normalized) || primary_normalized.contains(&normalize_name(&column.name)))
-                .map(|column| column.name.clone())
-        })
-        .ok_or_else(|| anyhow!("未找到可映射字段 {primary_name}"))
-}
-
-fn shared_key_candidates(primary_keys: &[String], secondary_keys: &[String], table: &DataTable) -> Vec<String> {
-    if primary_keys.is_empty() {
-        return Vec::new();
-    }
-    primary_keys
-        .iter()
-        .filter_map(|key| {
-            secondary_keys
-                .iter()
-                .find(|candidate| normalize_name(candidate) == normalize_name(key))
-                .cloned()
-                .or_else(|| has_column(table, key).then_some(key.clone()))
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+        .ok_or_else(|| anyhow!("辅源未找到与 {primary_name} 同名的字段"))
 }
 
 fn source_confidence(source: SourceBundle<'_>, missing_ratio: f64) -> f64 {
@@ -1524,6 +1447,23 @@ fn fill_with_window_mean(rows: &mut [PreparedRow], indexes: &[usize], column_ind
     }
 }
 
+fn fill_group_with_nearest(rows: &mut [PreparedRow], indexes: &[usize], column_index: usize) {
+    for position in 0..indexes.len() {
+        let row_index = indexes[position];
+        if rows[row_index].cells[column_index].is_some() {
+            continue;
+        }
+        let previous = indexes[..position]
+            .iter()
+            .rev()
+            .find_map(|index| rows[*index].cells[column_index].as_ref().cloned());
+        let next = indexes[position + 1..]
+            .iter()
+            .find_map(|index| rows[*index].cells[column_index].as_ref().cloned());
+        rows[row_index].cells[column_index] = previous.or(next);
+    }
+}
+
 fn interpolate_anchor_group(rows: &mut [FusionAnchorRow], indexes: &[usize], column_index: usize) {
     let mut position = 0usize;
     while position < indexes.len() {
@@ -1589,6 +1529,26 @@ fn fill_anchor_with_window_mean(rows: &mut [FusionAnchorRow], indexes: &[usize],
         if let (Some(previous), Some(next)) = (previous, next) {
             rows[row_index].cells[column_index] = Some(format_number((previous + next) / 2.0));
             rows[row_index].corrections.insert("窗口均值".to_string());
+        }
+    }
+}
+
+fn fill_anchor_with_nearest(rows: &mut [FusionAnchorRow], indexes: &[usize], column_index: usize) {
+    for position in 0..indexes.len() {
+        let row_index = indexes[position];
+        if rows[row_index].cells[column_index].is_some() {
+            continue;
+        }
+        let previous = indexes[..position]
+            .iter()
+            .rev()
+            .find_map(|index| rows[*index].cells[column_index].as_ref().cloned());
+        let next = indexes[position + 1..]
+            .iter()
+            .find_map(|index| rows[*index].cells[column_index].as_ref().cloned());
+        if let Some(value) = previous.or(next) {
+            rows[row_index].cells[column_index] = Some(value);
+            rows[row_index].corrections.insert("就近填充".to_string());
         }
     }
 }
@@ -1695,6 +1655,27 @@ fn normalize_name(value: &str) -> String {
         .collect()
 }
 
+fn unique_output_name(base: &str, seen_names: &mut BTreeSet<String>) -> String {
+    let trimmed = base.trim();
+    let candidate = if trimmed.is_empty() { "fusion_field" } else { trimmed };
+    let normalized = normalize_name(candidate);
+    if !seen_names.contains(&normalized) {
+        seen_names.insert(normalized);
+        return candidate.to_string();
+    }
+
+    let mut suffix = 2usize;
+    loop {
+        let name = format!("{candidate}_{suffix}");
+        let normalized = normalize_name(&name);
+        if !seen_names.contains(&normalized) {
+            seen_names.insert(normalized);
+            return name;
+        }
+        suffix += 1;
+    }
+}
+
 fn parse_datetime_cell(value: Option<&String>) -> Option<NaiveDateTime> {
     value.and_then(|value| parse_datetime_value(value))
 }
@@ -1749,6 +1730,7 @@ fn parse_numeric(value: &str) -> Option<f64> {
     value.trim().replace([',', ' '], "").parse::<f64>().ok()
 }
 
+#[allow(dead_code)]
 fn compare_datetime_cells(left: Option<&Option<String>>, right: Option<&Option<String>>) -> Ordering {
     let left = left.and_then(|cell| cell.as_ref()).and_then(|value| parse_datetime_value(value));
     let right = right.and_then(|cell| cell.as_ref()).and_then(|value| parse_datetime_value(value));
@@ -1782,6 +1764,7 @@ fn time_weight(base: f64, distance: i64, window_seconds: i64) -> f64 {
     (base * (0.55 + closeness * 0.45)).clamp(0.1, 1.0)
 }
 
+#[allow(dead_code)]
 fn dataset_alias(dataset_id: i32, dataset_name: &str) -> String {
     let mut slug = dataset_name
         .chars()
@@ -1795,6 +1778,7 @@ fn dataset_alias(dataset_id: i32, dataset_name: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn guess_role_label(dataset_name: &str) -> &'static str {
     let name = dataset_name.to_ascii_lowercase();
     if name.contains("sensor") || dataset_name.contains("传感") || dataset_name.contains("采样") {
@@ -1814,23 +1798,10 @@ fn guess_role_label(dataset_name: &str) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn looks_like_time_name(value: &str) -> bool {
     let normalized = normalize_name(value);
     normalized.contains("time") || normalized.contains("timestamp") || value.contains("时间")
-}
-
-fn hint_score(hint: &FusionSourceHint) -> f64 {
-    let mut score = 0.0;
-    if hint.object_hint != "未发现共享对象键" {
-        score += 1.0;
-    }
-    if hint.time_hint != "未识别" {
-        score += 0.6;
-    }
-    if !hint.note.contains("建议先统一字段命名") {
-        score += 0.4;
-    }
-    score
 }
 
 fn bucket_epoch(timestamp: NaiveDateTime, bucket_size: i64) -> i64 {

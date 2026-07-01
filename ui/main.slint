@@ -9,7 +9,6 @@ import {
     ColumnRowData,
     DatasetCardData,
     FormState,
-    FusionHintData,
     IssueRowData,
     JoinSuggestionData,
     Logic,
@@ -34,7 +33,6 @@ export {
     ColumnRowData,
     DatasetCardData,
     FormState,
-    FusionHintData,
     IssueRowData,
     JoinSuggestionData,
     Logic,
@@ -70,42 +68,6 @@ component SummaryLine inherits Rectangle {
 
         Text {
             horizontal-stretch: 1;
-            text: root.value;
-            color: AppTheme.text;
-            font-size: 10px;
-            wrap: word-wrap;
-        }
-    }
-}
-
-component InfoCard inherits Rectangle {
-    in property <string> title;
-    in property <string> value;
-    in property <length> card-min-height: 72px;
-
-    min-height: root.card-min-height;
-    background: AppTheme.panel-muted;
-    border-width: 1px;
-    border-color: AppTheme.border;
-    border-radius: 3px;
-
-    VerticalBox {
-        width: parent.width;
-        height: parent.height;
-        padding-left: 8px;
-        padding-right: 8px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-        spacing: 4px;
-
-        Text {
-            text: root.title;
-            color: AppTheme.text-soft;
-            font-size: 10px;
-            font-weight: 600;
-        }
-
-        Text {
             text: root.value;
             color: AppTheme.text;
             font-size: 10px;
@@ -297,74 +259,6 @@ component StepRow inherits Rectangle {
         LedgerCell {
             cell-width: 280px;
             value: root.outcome;
-        }
-    }
-}
-
-component FusionHintRow inherits Rectangle {
-    in property <string> dataset-id;
-    in property <string> dataset-name;
-    in property <string> role-hint;
-    in property <string> object-hint;
-    in property <string> time-hint;
-    in property <string> note;
-
-    min-height: 82px;
-    background: AppTheme.panel-bg;
-    border-width: 1px;
-    border-color: AppTheme.border;
-    border-radius: 4px;
-
-    VerticalBox {
-        width: parent.width;
-        height: parent.height;
-        padding-left: 8px;
-        padding-right: 8px;
-        padding-top: 8px;
-        padding-bottom: 8px;
-        spacing: 4px;
-
-        HorizontalBox {
-            spacing: 6px;
-
-            Text {
-                text: "辅源 #" + root.dataset-id + " · " + root.dataset-name;
-                color: AppTheme.text;
-                font-size: 11px;
-                font-weight: 700;
-            }
-
-            Rectangle {
-                horizontal-stretch: 1;
-                min-width: 0px;
-            }
-
-            StatusTag {
-                label: root.role-hint;
-                fill: AppTheme.accent-bg;
-                text-color: AppTheme.accent-fg;
-            }
-        }
-
-        Text {
-            text: "对象键: " + root.object-hint;
-            color: AppTheme.text-soft;
-            font-size: 10px;
-            wrap: word-wrap;
-        }
-
-        Text {
-            text: "时间列: " + root.time-hint;
-            color: AppTheme.text-soft;
-            font-size: 10px;
-            wrap: word-wrap;
-        }
-
-        Text {
-            text: root.note;
-            color: AppTheme.text;
-            font-size: 10px;
-            wrap: word-wrap;
         }
     }
 }
@@ -2463,319 +2357,250 @@ export component MainWindow inherits Window {
                                 background: AppTheme.window-bg;
                                 clip: true;
 
-                                HorizontalBox {
+                                fusion-page-scroll := ScrollView {
+                                    x: 0px;
+                                    y: 0px;
                                     width: parent.width;
                                     height: parent.height;
-                                    spacing: 8px;
+                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                                    vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                    viewport-width: self.visible-width;
+                                    viewport-height: max(self.visible-height, fusion-page-content.preferred-height);
 
-                                    Panel {
-                                        width: 462px;
-                                        title: "多源数据融合配置";
-                                        subtitle: "左侧配置主源、辅源、对齐、质量治理和输出策略。";
+                                    fusion-page-content := VerticalBox {
+                                        width: fusion-page-scroll.visible-width;
+                                        spacing: 8px;
 
-                                        ScrollView {
-                                            min-height: 0px;
-                                            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                            vertical-scrollbar-policy: ScrollBarPolicy.always-on;
-                                            viewport-width: self.visible-width;
+                                        Panel {
+                                            title: "1. 数据源与字段";
+                                            subtitle: "";
 
                                             VerticalBox {
-                                                spacing: 8px;
+                                                spacing: 6px;
 
-                                                Panel {
-                                                    title: "源配置";
-                                                    subtitle: "";
-
-                                                    VerticalBox {
-                                                        spacing: 6px;
-
-                                                        InfoCard {
-                                                            card-min-height: 58px;
-                                                            title: "主源";
-                                                            value: AppState.current-dataset-name;
-                                                        }
-
-                                                        LabeledField {
-                                                            label: "辅源数据集编号";
-                                                            placeholder: "例如：2, 3, 4";
-                                                            text <=> FormState.fusion-secondary-dataset-ids;
-                                                        }
-
-                                                        Text {
-                                                            text: AppState.fusion-source-hint;
-                                                            color: AppTheme.text-soft;
-                                                            font-size: 10px;
-                                                            wrap: word-wrap;
-                                                        }
-                                                    }
+                                                SummaryLine {
+                                                    label: "主源";
+                                                    value: AppState.current-dataset-name + " | " + AppState.current-dataset-overview;
                                                 }
 
-                                                Panel {
-                                                    title: "对象与时间对齐";
-                                                    subtitle: "";
-
-                                                    VerticalBox {
-                                                        spacing: 6px;
-
-                                                        LabeledField {
-                                                            label: "对象键";
-                                                            placeholder: "例如：device_id, channel_id";
-                                                            text <=> FormState.fusion-object-keys;
-                                                        }
-
-                                                        LabeledField {
-                                                            label: "时间列";
-                                                            placeholder: "例如：timestamp";
-                                                            text <=> FormState.fusion-time-column;
-                                                        }
-
-                                                        HorizontalBox {
-                                                            spacing: 6px;
-
-                                                            LabeledChoice {
-                                                                width: 180px;
-                                                                label: "对齐模式";
-                                                                model: [
-                                                                    "按时间精确对齐",
-                                                                    "按最近邻对齐",
-                                                                    "按时间窗聚合",
-                                                                    "按重采样对齐"
-                                                                ];
-                                                                value <=> FormState.fusion-alignment-mode;
-                                                            }
-
-                                                            LabeledField {
-                                                                width: 120px;
-                                                                label: "时间窗(s)";
-                                                                placeholder: "5";
-                                                                text <=> FormState.fusion-time-window-seconds;
-                                                            }
-
-                                                            LabeledField {
-                                                                width: 120px;
-                                                                label: "重采样(s)";
-                                                                placeholder: "60";
-                                                                text <=> FormState.fusion-resample-seconds;
-                                                            }
-                                                        }
-                                                    }
+                                                SummaryLine {
+                                                    label: "辅源";
+                                                    value: AppState.fusion-source-hint;
                                                 }
 
-                                                Panel {
-                                                    title: "质量治理与融合策略";
-                                                    subtitle: "";
+                                                HorizontalBox {
+                                                    spacing: 6px;
 
-                                                    VerticalBox {
-                                                        spacing: 6px;
-
-                                                        HorizontalBox {
-                                                            spacing: 6px;
-
-                                                            LabeledChoice {
-                                                                width: 180px;
-                                                                label: "缺失补偿";
-                                                                model: [
-                                                                    "保持空值并标记",
-                                                                    "前向填充",
-                                                                    "后向填充",
-                                                                    "线性插值",
-                                                                    "窗口均值"
-                                                                ];
-                                                                value <=> FormState.fusion-missing-strategy;
-                                                            }
-
-                                                            LabeledChoice {
-                                                                width: 180px;
-                                                                label: "融合策略";
-                                                                model: ["主源优先", "质量加权", "互补填充", "冲突保留"];
-                                                                value <=> FormState.fusion-strategy;
-                                                            }
-                                                        }
-
-                                                        HorizontalBox {
-                                                            spacing: 6px;
-
-                                                            LabeledField {
-                                                                width: 120px;
-                                                                label: "异常阈值";
-                                                                placeholder: "3.5";
-                                                                text <=> FormState.fusion-outlier-zscore;
-                                                            }
-
-                                                            LabeledField {
-                                                                width: 120px;
-                                                                label: "告警阈值";
-                                                                placeholder: "70";
-                                                                text <=> FormState.fusion-alert-threshold;
-                                                            }
-                                                        }
-
-                                                        HorizontalBox {
-                                                            spacing: 6px;
-
-                                                            InlineToggleButton {
-                                                                width: 90px;
-                                                                label: "去重包";
-                                                                checked <=> FormState.fusion-deduplicate-packets;
-                                                            }
-
-                                                            InlineToggleButton {
-                                                                width: 90px;
-                                                                label: "清异常";
-                                                                checked <=> FormState.fusion-clean-outliers;
-                                                            }
-
-                                                            InlineToggleButton {
-                                                                width: 90px;
-                                                                label: "质量分";
-                                                                checked <=> FormState.fusion-score-quality;
-                                                            }
-                                                        }
+                                                    LabeledField {
+                                                        width: 220px;
+                                                        label: "辅源数据集编号";
+                                                        placeholder: "例如：2, 3, 4";
+                                                        text <=> FormState.fusion-secondary-dataset-ids;
                                                     }
-                                                }
 
-                                                Panel {
-                                                    title: "输出结果";
-                                                    subtitle: "";
-
-                                                    VerticalBox {
-                                                        spacing: 6px;
-
-                                                        HorizontalBox {
-                                                            spacing: 6px;
-
-                                                            InlineToggleButton {
-                                                                width: 98px;
-                                                                label: "特征表";
-                                                                checked <=> FormState.fusion-generate-features;
-                                                            }
-
-                                                            InlineToggleButton {
-                                                                width: 98px;
-                                                                label: "事件表";
-                                                                checked <=> FormState.fusion-generate-events;
-                                                            }
-
-                                                            InlineToggleButton {
-                                                                width: 98px;
-                                                                label: "告警表";
-                                                                checked <=> FormState.fusion-generate-alerts;
-                                                            }
-                                                        }
-
-                                                        HorizontalBox {
-                                                            spacing: 6px;
-
-                                                            Button {
-                                                                text: "自动识别";
-                                                                height: 30px;
-                                                                clicked => { Logic.autofill-fusion(); }
-                                                            }
-
-                                                            Button {
-                                                                text: "执行融合";
-                                                                primary: true;
-                                                                height: 30px;
-                                                                clicked => { Logic.apply-fusion(); }
-                                                            }
-                                                        }
+                                                    LabeledField {
+                                                        width: 240px;
+                                                        label: "对象键";
+                                                        placeholder: "例如：device_id, channel_id";
+                                                        text <=> FormState.fusion-object-keys;
                                                     }
-                                                }
 
-                                                Rectangle {
-                                                    height: 16px;
+                                                    LabeledField {
+                                                        width: 220px;
+                                                        label: "时间列";
+                                                        placeholder: "例如：timestamp";
+                                                        text <=> FormState.fusion-time-column;
+                                                    }
+
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        min-width: 0px;
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    Rectangle {
-                                        horizontal-stretch: 1;
-                                        vertical-stretch: 1;
-                                        background: transparent;
-                                        min-width: 0px;
-                                        min-height: 0px;
+                                        Panel {
+                                            title: "2. 对齐策略";
+                                            subtitle: "";
 
-                                        VerticalBox {
-                                            width: parent.width;
-                                            height: parent.height;
-                                            spacing: 8px;
+                                            VerticalBox {
+                                                spacing: 6px;
 
-                                            HorizontalBox {
-                                                spacing: 8px;
+                                                HorizontalBox {
+                                                    spacing: 6px;
 
-                                                InfoCard {
-                                                    horizontal-stretch: 1;
-                                                    card-min-height: 82px;
-                                                    title: "融合源概况";
-                                                    value: AppState.fusion-source-summary;
+                                                    LabeledChoice {
+                                                        width: 240px;
+                                                        label: "对齐模式";
+                                                        model: [
+                                                            "按时间精确对齐",
+                                                            "精确优先，最近邻兜底",
+                                                            "按最近邻对齐",
+                                                            "精确优先，时间窗聚合兜底",
+                                                            "按时间窗聚合",
+                                                            "按重采样对齐"
+                                                        ];
+                                                        value <=> FormState.fusion-alignment-mode;
+                                                    }
+
+                                                    LabeledField {
+                                                        width: 130px;
+                                                        label: "时间窗(s)";
+                                                        placeholder: "5";
+                                                        text <=> FormState.fusion-time-window-seconds;
+                                                    }
+
+                                                    LabeledField {
+                                                        width: 130px;
+                                                        label: "重采样(s)";
+                                                        placeholder: "60";
+                                                        text <=> FormState.fusion-resample-seconds;
+                                                    }
+
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        min-width: 0px;
+                                                    }
                                                 }
 
-                                                InfoCard {
-                                                    horizontal-stretch: 1;
-                                                    card-min-height: 82px;
-                                                    title: "对齐结果";
-                                                    value: AppState.fusion-alignment-summary;
+                                                Text {
+                                                    text: "建议：严格同频数据用精确对齐；轻微时钟偏差用最近邻；传感抖动或批量采样用时间窗聚合；低频状态量用重采样。";
+                                                    color: AppTheme.text-soft;
+                                                    font-size: 10px;
+                                                    wrap: word-wrap;
                                                 }
                                             }
+                                        }
 
-                                            HorizontalBox {
-                                                spacing: 8px;
+                                        Panel {
+                                            title: "3. 补偿与冲突处理";
+                                            subtitle: "";
 
-                                                InfoCard {
-                                                    horizontal-stretch: 1;
-                                                    card-min-height: 82px;
-                                                    title: "质量治理";
-                                                    value: AppState.fusion-quality-summary;
-                                                }
+                                            VerticalBox {
+                                                spacing: 6px;
 
-                                                InfoCard {
-                                                    horizontal-stretch: 1;
-                                                    card-min-height: 82px;
-                                                    title: "输出结果";
-                                                    value: AppState.fusion-output-summary;
-                                                }
-                                            }
+                                                HorizontalBox {
+                                                    spacing: 6px;
 
-                                            InfoCard {
-                                                card-min-height: 74px;
-                                                title: "追溯信息";
-                                                value: AppState.fusion-trace-summary;
-                                            }
+                                                    LabeledChoice {
+                                                        width: 210px;
+                                                        label: "缺失补偿";
+                                                        model: [
+                                                            "保持空值并标记",
+                                                            "前向填充",
+                                                            "后向填充",
+                                                            "前后就近填充",
+                                                            "线性插值",
+                                                            "窗口均值"
+                                                        ];
+                                                        value <=> FormState.fusion-missing-strategy;
+                                                    }
 
-                                            Panel {
-                                                horizontal-stretch: 1;
-                                                vertical-stretch: 1;
-                                                title: "候选辅源预览";
-                                                subtitle: "按共享对象键、时间列和数据角色给出自动建议。";
+                                                    LabeledChoice {
+                                                        width: 210px;
+                                                        label: "融合策略";
+                                                        model: [
+                                                            "主源优先",
+                                                            "辅源优先",
+                                                            "质量加权",
+                                                            "数值均值",
+                                                            "互补填充",
+                                                            "冲突保留"
+                                                        ];
+                                                        value <=> FormState.fusion-strategy;
+                                                    }
 
-                                                ScrollView {
-                                                    min-height: 0px;
-                                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                                    vertical-scrollbar-policy: ScrollBarPolicy.always-on;
-                                                    viewport-width: self.visible-width;
-
-                                                    VerticalBox {
-                                                        spacing: 6px;
-
-                                                        for hint in AppState.fusion-hints: FusionHintRow {
-                                                            dataset-id: hint.dataset-id;
-                                                            dataset-name: hint.dataset-name;
-                                                            role-hint: hint.role-hint;
-                                                            object-hint: hint.object-hint;
-                                                            time-hint: hint.time-hint;
-                                                            note: hint.note;
-                                                        }
-
-                                                        if AppState.fusion-hints.length == 0: Text {
-                                                            text: "暂无候选辅源。\n先导入多个数据集并选中主源，再自动识别。";
-                                                            color: AppTheme.text-soft;
-                                                            font-size: 12px;
-                                                            horizontal-alignment: center;
-                                                        }
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        min-width: 0px;
                                                     }
                                                 }
                                             }
+                                        }
+
+                                        Panel {
+                                            title: "4. 数据治理";
+                                            subtitle: "";
+
+                                            VerticalBox {
+                                                spacing: 6px;
+
+                                                HorizontalBox {
+                                                    spacing: 6px;
+
+                                                    LabeledField {
+                                                        width: 140px;
+                                                        label: "异常阈值";
+                                                        placeholder: "3.5";
+                                                        text <=> FormState.fusion-outlier-zscore;
+                                                    }
+
+                                                    InlineToggleButton {
+                                                        width: 100px;
+                                                        label: "去重";
+                                                        checked <=> FormState.fusion-deduplicate-packets;
+                                                    }
+
+                                                    InlineToggleButton {
+                                                        width: 100px;
+                                                        label: "处理异常";
+                                                        checked <=> FormState.fusion-clean-outliers;
+                                                    }
+
+                                                    InlineToggleButton {
+                                                        width: 100px;
+                                                        label: "评分";
+                                                        checked <=> FormState.fusion-score-quality;
+                                                    }
+
+                                                    Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        min-width: 0px;
+                                                    }
+
+                                                    Button {
+                                                        text: "执行融合";
+                                                        primary: true;
+                                                        height: 30px;
+                                                        clicked => { Logic.apply-fusion(); }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Panel {
+                                            title: "执行摘要";
+                                            subtitle: "";
+
+                                            VerticalBox {
+                                                spacing: 6px;
+
+                                                SummaryLine {
+                                                    label: "源概况";
+                                                    value: AppState.fusion-source-summary;
+                                                }
+
+                                                SummaryLine {
+                                                    label: "对齐";
+                                                    value: AppState.fusion-alignment-summary;
+                                                }
+
+                                                SummaryLine {
+                                                    label: "质量";
+                                                    value: AppState.fusion-quality-summary;
+                                                }
+
+                                                SummaryLine {
+                                                    label: "输出";
+                                                    value: AppState.fusion-output-summary;
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            height: 24px;
+                                            background: transparent;
                                         }
                                     }
                                 }
@@ -3103,7 +2928,7 @@ export component MainWindow inherits Window {
                                                     }
 
                                                     Button {
-                                                        text: "回放流程模板";
+                                                        text: "复用流程模板";
                                                         height: 28px;
                                                         clicked => { Logic.replay-pipeline-template(); }
                                                     }
@@ -3186,4 +3011,3 @@ export component MainWindow inherits Window {
         }
     }
 }
-
