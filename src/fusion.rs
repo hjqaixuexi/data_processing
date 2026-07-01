@@ -1,4 +1,4 @@
-use crate::model::{DataTable, DatasetProfile, LogicalType, TableColumn, infer_logical_type};
+﻿use crate::model::{DataTable, DatasetProfile, LogicalType, TableColumn, infer_logical_type};
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use std::cmp::Ordering;
@@ -85,19 +85,10 @@ impl FusionStrategy {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::PrimaryFirst => "主源优先",
-            Self::ConfidenceWeighted => "质量加权",
-            Self::ComplementaryFill => "互补填充",
-            Self::ConflictRetention => "冲突保留",
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct FusionRequest {
-    pub scene: String,
     pub secondary_dataset_ids: Vec<i32>,
     pub object_keys: Vec<String>,
     pub time_column: String,
@@ -205,13 +196,9 @@ struct FusionAnchorRow {
     object_key: String,
     timestamp: Option<NaiveDateTime>,
     cells: Vec<Option<String>>,
-    matched_sources: Vec<String>,
     trace_parts: Vec<String>,
     corrections: BTreeSet<String>,
     quality_score: f64,
-    missing_fields: usize,
-    anomaly_cells: usize,
-    match_count: usize,
 }
 
 pub fn build_source_hints(primary: SourceBundle<'_>, others: &[SourceBundle<'_>]) -> Vec<FusionSourceHint> {
@@ -355,7 +342,7 @@ pub fn execute(
             .map(|value| if is_non_empty(value.as_deref()) { 1.0 } else { 0.0 })
             .collect::<Vec<_>>();
         let mut raw_secondary_cells = Vec::new();
-        let mut matched_sources = Vec::new();
+        let mut matched_source_count = 0usize;
         let mut trace_parts = Vec::new();
         let mut corrections = BTreeSet::new();
         let mut missing_fields = 0usize;
@@ -364,7 +351,7 @@ pub fn execute(
         for source in &secondary_prepared {
             let match_result = select_secondary_match(source, primary_row, request)?;
             if let Some(found) = match_result {
-                matched_sources.push(source.dataset_name.clone());
+                matched_source_count += 1;
                 trace_parts.push(found.trace.clone());
                 if found.anomaly_cells > 0 {
                     corrections.insert("异常值剔除".to_string());
@@ -398,13 +385,13 @@ pub fn execute(
             }
         }
 
-        if !matched_sources.is_empty() {
+        if matched_source_count > 0 {
             matched_rows += 1;
         }
 
         let quality_score = if request.score_quality {
             compute_quality_score(
-                matched_sources.len(),
+                matched_source_count,
                 secondary_prepared.len(),
                 secondary_field_count,
                 missing_fields,
@@ -424,13 +411,9 @@ pub fn execute(
             object_key: primary_row.object_key.clone(),
             timestamp: primary_row.timestamp,
             cells: row,
-            matched_sources,
             trace_parts,
             corrections,
             quality_score,
-            missing_fields,
-            anomaly_cells,
-            match_count: 0,
         });
     }
 
@@ -443,60 +426,28 @@ pub fn execute(
 
     let mut final_headers = headers;
     final_headers.extend([
-        "fusion_match_count".to_string(),
-        "fusion_matched_sources".to_string(),
         "fusion_quality_score".to_string(),
-        "fusion_alert_level".to_string(),
         "fusion_trace".to_string(),
-        "fusion_rule".to_string(),
         "fusion_corrections".to_string(),
-        "fusion_missing_fields".to_string(),
-        "fusion_anomaly_cells".to_string(),
     ]);
     let mut final_types = logical_types;
     final_types.extend([
-        LogicalType::Integer,
-        LogicalType::Text,
         LogicalType::Float,
         LogicalType::Text,
         LogicalType::Text,
-        LogicalType::Text,
-        LogicalType::Text,
-        LogicalType::Integer,
-        LogicalType::Integer,
     ]);
 
     let final_rows = anchor_rows
         .iter_mut()
         .map(|row| {
-            row.match_count = row.matched_sources.len();
-            let alert_level = if row.match_count == 0 {
-                "高"
-            } else if row.quality_score < request.alert_threshold {
-                "中"
-            } else if row.anomaly_cells > 0 {
-                "低"
-            } else {
-                "正常"
-            };
             let mut cells = row.cells.clone();
             cells.extend([
-                Some(row.match_count.to_string()),
-                Some(join_or_default(&row.matched_sources, "无命中源")),
                 Some(format_number(row.quality_score)),
-                Some(alert_level.to_string()),
                 Some(join_or_default(&row.trace_parts, "无融合轨迹")),
-                Some(format!(
-                    "{} + {}",
-                    request.alignment_mode.as_str(),
-                    request.fusion_strategy.as_str()
-                )),
                 Some(join_or_default(
                     &row.corrections.iter().cloned().collect::<Vec<_>>(),
                     request.missing_strategy.as_str(),
                 )),
-                Some(row.missing_fields.to_string()),
-                Some(row.anomaly_cells.to_string()),
             ]);
             cells
         })
@@ -675,7 +626,7 @@ fn prepare_secondary_source(
         dataset_name: source.dataset_name.to_string(),
         rows_by_key,
         bindings,
-        confidence: source_confidence(source, missing_ratio, request.scene.as_str()),
+        confidence: source_confidence(source, missing_ratio),
         deduplicated_rows,
     })
 }
@@ -1126,8 +1077,7 @@ fn build_event_table(
     let key_indexes = find_indexes(table, object_keys)?;
     let time_index = find_index(table, time_column)?;
     let quality_index = find_index(table, "fusion_quality_score")?;
-    let match_index = find_index(table, "fusion_match_count")?;
-    let trace_index = find_index(table, "fusion_matched_sources")?;
+    let trace_index = find_index(table, "fusion_trace")?;
     let gap_threshold = request.time_window_seconds.max(request.resample_seconds).max(60);
 
     let headers = vec![
@@ -1137,8 +1087,7 @@ fn build_event_table(
         "end_time".to_string(),
         "row_count".to_string(),
         "avg_quality_score".to_string(),
-        "coverage_ratio".to_string(),
-        "matched_sources".to_string(),
+        "trace_excerpt".to_string(),
     ];
 
     let mut rows = Vec::new();
@@ -1160,7 +1109,7 @@ fn build_event_table(
                 _ => false,
             };
             if should_split && !segment.is_empty() {
-                rows.push(build_event_row(&object_key, segment_id, &segment, quality_index, match_index, trace_index, time_index));
+                rows.push(build_event_row(&object_key, segment_id, &segment, quality_index, trace_index, time_index));
                 segment.clear();
                 segment_id += 1;
             }
@@ -1168,7 +1117,7 @@ fn build_event_table(
             segment.push(row);
         }
         if !segment.is_empty() {
-            rows.push(build_event_row(&object_key, segment_id, &segment, quality_index, match_index, trace_index, time_index));
+            rows.push(build_event_row(&object_key, segment_id, &segment, quality_index, trace_index, time_index));
         }
     }
 
@@ -1184,10 +1133,8 @@ fn build_alert_table(
     let key_indexes = find_indexes(table, object_keys)?;
     let time_index = find_index(table, time_column)?;
     let quality_index = find_index(table, "fusion_quality_score")?;
-    let level_index = find_index(table, "fusion_alert_level")?;
     let trace_index = find_index(table, "fusion_trace")?;
-    let missing_index = find_index(table, "fusion_missing_fields")?;
-    let anomaly_index = find_index(table, "fusion_anomaly_cells")?;
+    let correction_index = find_index(table, "fusion_corrections")?;
 
     let rows = table_rows(table)
         .into_iter()
@@ -1197,38 +1144,37 @@ fn build_alert_table(
                 .and_then(|cell| cell.as_ref())
                 .and_then(|value| parse_numeric(value))
                 .unwrap_or(100.0);
-            let level = row
-                .get(level_index)
+            let corrections = row
+                .get(correction_index)
+                .and_then(|cell| cell.as_ref())
                 .cloned()
-                .unwrap_or_else(|| Some("正常".to_string()));
-            let missing = row
-                .get(missing_index)
-                .and_then(|cell| cell.as_ref())
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(0);
-            let anomaly = row
-                .get(anomaly_index)
-                .and_then(|cell| cell.as_ref())
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(0);
-            let alert_needed = quality < request.alert_threshold
-                || level.as_deref().unwrap_or("正常") != "正常"
-                || missing > 0
-                || anomaly > 0;
+                .unwrap_or_default();
+            let has_correction = !corrections.trim().is_empty()
+                && corrections.trim() != "保持空值并标记"
+                && corrections.trim() != "前向填充"
+                && corrections.trim() != "后向填充"
+                && corrections.trim() != "线性插值"
+                && corrections.trim() != "窗口均值";
+            let alert_needed = quality < request.alert_threshold || has_correction;
             if !alert_needed {
                 return None;
             }
+            let level = if quality < request.alert_threshold * 0.75 {
+                "高"
+            } else if quality < request.alert_threshold || has_correction {
+                "中"
+            } else {
+                "低"
+            };
             let reason = if quality < request.alert_threshold {
                 format!("质量分 {:.1} 低于阈值 {:.1}", quality, request.alert_threshold)
-            } else if anomaly > 0 {
-                format!("发现 {} 个异常单元", anomaly)
             } else {
-                format!("存在 {} 个缺失字段", missing)
+                format!("检测到修正记录：{}", corrections)
             };
             Some(vec![
                 Some(compose_key(&row, &key_indexes)),
                 row.get(time_index).cloned().unwrap_or(None),
-                level,
+                Some(level.to_string()),
                 Some(reason),
                 row.get(quality_index).cloned().unwrap_or(None),
                 row.get(trace_index).cloned().unwrap_or(None),
@@ -1255,7 +1201,6 @@ fn build_event_row(
     segment_id: usize,
     segment: &[Vec<Option<String>>],
     quality_index: usize,
-    match_index: usize,
     trace_index: usize,
     time_index: usize,
 ) -> Vec<Option<String>> {
@@ -1268,19 +1213,11 @@ fn build_event_row(
     } else {
         Some(format_number(qualities.iter().sum::<f64>() / qualities.len() as f64))
     };
-    let coverage = if segment.is_empty() {
-        None
-    } else {
-        let matched = segment
-            .iter()
-            .filter(|row| row.get(match_index).and_then(|cell| cell.as_ref()).and_then(|value| value.parse::<usize>().ok()).unwrap_or(0) > 0)
-            .count();
-        Some(format_number(matched as f64 / segment.len() as f64 * 100.0))
-    };
-    let matched_sources = segment
+    let trace_excerpt = segment
         .iter()
         .filter_map(|row| row.get(trace_index).and_then(|cell| cell.as_ref()).cloned())
-        .take(3)
+        .filter(|trace| !trace.trim().is_empty() && trace != "无融合轨迹")
+        .take(2)
         .collect::<Vec<_>>()
         .join(" | ");
     vec![
@@ -1290,8 +1227,7 @@ fn build_event_row(
         segment.last().and_then(|row| row.get(time_index).cloned().unwrap_or(None)),
         Some(segment.len().to_string()),
         avg_quality,
-        coverage,
-        Some(matched_sources),
+        Some(trace_excerpt),
     ]
 }
 
@@ -1395,10 +1331,9 @@ fn shared_key_candidates(primary_keys: &[String], secondary_keys: &[String], tab
         .collect()
 }
 
-fn source_confidence(source: SourceBundle<'_>, missing_ratio: f64, scene: &str) -> f64 {
+fn source_confidence(source: SourceBundle<'_>, missing_ratio: f64) -> f64 {
     let mut score: f64 = 0.62;
     let name = source.dataset_name.to_ascii_lowercase();
-    let normalized_scene = scene.to_ascii_lowercase();
 
     if source.profile.resolved_time_column.len() > 0 || !source.profile.time_candidates.is_empty() {
         score += 0.08;
@@ -1417,7 +1352,7 @@ fn source_confidence(source: SourceBundle<'_>, missing_ratio: f64, scene: &str) 
     if name.contains("control") || name.contains("command") || source.dataset_name.contains("指令") {
         score += 0.06;
     }
-    if name.contains("sim") || source.dataset_name.contains("仿真") || normalized_scene.contains("仿真") {
+    if name.contains("sim") || source.dataset_name.contains("仿真") {
         score -= 0.08;
     }
     score.clamp(0.25, 1.0)

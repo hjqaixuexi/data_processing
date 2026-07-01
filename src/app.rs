@@ -1484,24 +1484,6 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         form.set_visualization_title(SharedString::new());
         form.set_visualization_x_label(SharedString::new());
         form.set_visualization_y_label(SharedString::new());
-        if let Some(report) = service.last_fusion_report() {
-            state.set_fusion_source_summary(report.source_summary.clone().into());
-            state.set_fusion_alignment_summary(report.alignment_summary.clone().into());
-            state.set_fusion_quality_summary(report.quality_summary.clone().into());
-            state.set_fusion_output_summary(report.output_summary.clone().into());
-            let trace = if report.skipped_sources.is_empty() {
-                report.trace_summary.clone()
-            } else {
-                format!("{} | 跳过辅源：{}", report.trace_summary, report.skipped_sources.join("；"))
-            };
-            state.set_fusion_trace_summary(trace.into());
-        } else {
-            state.set_fusion_source_summary("未执行融合，默认以当前选中数据集作为主源。".into());
-            state.set_fusion_alignment_summary("等待选择辅源、对象键和时间列。".into());
-            state.set_fusion_quality_summary("可选缺失补偿、异常剔除、去重包和质量评分。".into());
-            state.set_fusion_output_summary("执行后会生成统一时序表，并可附带特征表、事件表、告警表。".into());
-            state.set_fusion_trace_summary("每条结果会附带匹配轨迹、质量分、告警级别和修正记录。".into());
-        }
         form.set_visualization_x_column(SharedString::new());
         form.set_visualization_y_column(SharedString::new());
         form.set_visualization_category_column(SharedString::new());
@@ -1545,6 +1527,11 @@ fn refresh_ui(ui: &MainWindow, service: &AppService, status: &str) {
         state.set_join_unmatched_summary("尚未生成未匹配统计".into());
         state.set_join_conflict_summary("尚未生成冲突字段清单".into());
         state.set_join_loss_summary("尚未生成数据丢失提示".into());
+        state.set_fusion_source_summary("导入多个数据集后可在此执行多源融合。".into());
+        state.set_fusion_alignment_summary("等待主源、辅源、对象键和时间列。".into());
+        state.set_fusion_quality_summary("默认支持去重包、异常清洗、缺失补偿和质量评分。".into());
+        state.set_fusion_output_summary("统一时序表仅保留必要的质量分、轨迹和修正字段。".into());
+        state.set_fusion_trace_summary("事件表和告警表会承接主要追溯信息。".into());
     }
 
     state.set_status_message(status.into());
@@ -1634,7 +1621,6 @@ fn parse_adjacent_compare_mode(value: &str) -> AdjacentCompareMode {
 
 fn build_fusion_request(form: &FormState) -> FusionRequest {
     FusionRequest {
-        scene: form.get_fusion_scene().to_string(),
         secondary_dataset_ids: split_csv_like(&form.get_fusion_secondary_dataset_ids().to_string())
             .iter()
             .filter_map(|value| value.parse::<i32>().ok())

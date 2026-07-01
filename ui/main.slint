@@ -2495,17 +2495,6 @@ export component MainWindow inherits Window {
                                                             value: AppState.current-dataset-name;
                                                         }
 
-                                                        LabeledChoice {
-                                                            label: "融合场景";
-                                                            model: [
-                                                                "传感采样 + 设备状态 + 控制指令",
-                                                                "试验工况 + 传感采样 + 人工标签",
-                                                                "仿真结果 + 实测数据 + 设备状态",
-                                                                "批次工艺 + 检测结果 + 告警记录"
-                                                            ];
-                                                            value <=> FormState.fusion-scene;
-                                                        }
-
                                                         LabeledField {
                                                             label: "辅源数据集编号";
                                                             placeholder: "例如：2, 3, 4";
@@ -3197,3 +3186,4 @@ export component MainWindow inherits Window {
         }
     }
 }
+

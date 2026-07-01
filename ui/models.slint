@@ -1,4 +1,4 @@
-export struct DatasetCardData {
+﻿export struct DatasetCardData {
     dataset-id: int,
     name: string,
     format: string,
@@ -161,7 +161,6 @@ export global FormState {
     in-out property <string> join-kind: "左连接";
     in-out property <string> join-scene: "试验采样数据 + 指标汇总表";
     in-out property <string> join-conflict-mode: "冲突列追加_right";
-    in-out property <string> fusion-scene: "传感采样 + 设备状态 + 控制指令";
     in-out property <string> fusion-secondary-dataset-ids;
     in-out property <string> fusion-object-keys;
     in-out property <string> fusion-time-column;
@@ -336,3 +335,4 @@ export global Logic {
     callback save-pipeline-template();
     callback replay-pipeline-template();
 }
+
